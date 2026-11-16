@@ -1,0 +1,46 @@
+{
+  "name": "@local/dsh-breeze-voice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Breeze TTS 2 as a universal voice-output plugin: a settings panel modeled on Aurabot's Breeze options, registering local voices into any voice-consuming plugin through a shared voice registry.",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "engine/service.mjs",
+    "engine/emotion.mjs",
+    "engine/loudness.mjs",
+    "locale/*.json",
+    "docs",
+    "icon.svg",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tts",
+    "breeze",
+    "voice"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "本地语音 · Breeze TTS 2",
+    "description": "把本机的 Breeze TTS 2 音色注册给所有支持语音输出的插件，在设置页里像 Aurabot 一样选择音色、情绪和显存策略。"
+  },
+  "nav": "本地语音",
+  "section": {
+    "title": "本地语音 · Breeze TTS 2",
+    "subtitle": "本机跑，音色和情绪在下面选；装好后所有需要语音的插件都能认出这些音色。"
+  }
+}

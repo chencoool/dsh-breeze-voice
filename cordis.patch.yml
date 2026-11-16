@@ -1,0 +1,7 @@
+# dsh-breeze-voice —— 把本地 Breeze TTS 语音插件挂进 DSH 配置树
+# insert 添加插件行；id 全局唯一且与包命名空间一致；name 解析到包入口 index.js（宿主半侧）。
+# package.json 里的 dsh.client 会让同一包被扫成浏览器插件，提供 ./client.js 给设置页。
+- insert:
+    - id: breeze-voice
+      name: '@local/dsh-breeze-voice'
+      config: {}
