@@ -19,7 +19,7 @@ DSH 核心目前**没有统一的语音输出（TTS）服务 seam**——只有�
 ## 前提
 
 1. 装好本插件：`dsh plugin --profile <你的profile名> add github:chencoool/dsh-breeze-voice`，装完重启 DSH。
-2. **推荐**装好 Breeze TTS 2 桌面版：从 [dkvkvk/breeze-tts-2-desktop 的 Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases) 下载 `BreezeTTS2-Setup-*.exe`，安装目录自己选，**启动桌面版**。本插件「连接方式」保持「自动」，探测到桌面版后端（`127.0.0.1:18099`）就自动连上——连接模式不用填安装目录、不用 `breeze-runtime.json`，音色来自桌面版克隆库（`voices\`）和内置描述式预设。若你没有桌面版、用的是旧的本机自管引擎，才需要在设置页填安装目录（含 `breeze-runtime.json`）。详见 README。
+2. **推荐**装好 Breeze TTS 2 桌面版：从 [dkvkvk/breeze-tts-2-desktop 的 Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases) 下载 `BreezeTTS2-Setup-*.exe`，安装目录自己选，**启动桌面版**。本插件「连接方式」保持「自动」，探测到桌面版后端（`127.0.0.1:18099`）就自动连上——连接模式不用填安装目录、不用 `breeze-runtime.json`，音色来自桌面版克隆库（`voices\`）和内置描述式预设。若你没有桌面版、用的是本机自管引擎，才需要在设置页填安装目录（桌面版布局缺 `breeze-runtime.json` 时插件会自动补写一份）。详见 README。
 3. 确认音色已就绪：连接模式下，音色标「（桌面版）」的是桌面版克隆音色（直接可用），其余是内置描述式预设；自管模式下标「本机」的可直接用，标「还没建好」的要先生成 `.breeze` 文件。
 
 ---
@@ -160,7 +160,7 @@ A：DSH 没有全局 TTS 注册表，不会自动出现在任何插件里。需�
 A：加载顺序问题。用 `ctx.inject(['breezeVoice'], fn)` 等它就绪后再注册，别在 `apply` 里假设它一定已经存在。
 
 **Q：合成报「请先填写安装目录」？**
-A：这是**自管模式**才有的提示——本插件没自动探测到旧版 Breeze 目录。两个解法：①推荐装 Breeze 桌面版并保持「连接方式=自动」，连接模式不需要安装目录；②确实要用自管模式，就去设置页「本地语音 → 安装目录」手动填（要含 `breeze-runtime.json`），保存后重试。
+A：这是**自管模式**才有的提示——本插件没自动探测到旧版 Breeze 目录。两个解法：①推荐装 Breeze 桌面版并保持「连接方式=自动」，连接模式不需要安装目录；②确实要用自管模式，就去设置页「本地语音 → 安装目录」手动填（含 breeze-server.exe 和 voices 文件夹；桌面版布局缺配置时插件会自动补写），保存后重试。
 
 **Q：音色标着「还没建好」能用吗？**
 A：不能。那是自管模式下预设/自定义项还没生成对应的 `.breeze` 文件，需要先在 Breeze 侧设计生成。连接模式的桌面版克隆音色标「（桌面版）」，可直接用。

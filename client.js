@@ -223,7 +223,7 @@ audio[data-bv-audio]{height:34px;max-width:100%;}
           ) : null,
 
           // b0c 安装目录（自管模式）
-          (draft.mode === 'local') ? h(Row, { key: 'root', label: '安装目录', hint: '自管模式的 Breeze 安装目录（里面要有 breeze-runtime.json 和 voices 文件夹）。' },
+          (draft.mode === 'local') ? h(Row, { key: 'root', label: '安装目录', hint: '自管模式的 Breeze 安装目录（含 breeze-server.exe 和 voices 文件夹；桌面版布局缺配置时插件会自动补写）。' },
             h('input', {
               'data-bv-input': '', 'data-wide': '', type: 'text',
               value: draft.root, placeholder: 'D:\\Breeze TTS 2',

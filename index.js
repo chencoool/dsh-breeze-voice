@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs'
-import { join, isAbsolute } from 'node:path'
+import { join, isAbsolute, relative } from 'node:path'
 import { homedir } from 'node:os'
 
 import { readRuntime, loadPresets, PRESETS, validateText, wavBuffer, createService } from './engine/service.mjs'
@@ -48,7 +48,15 @@ const CACHE = join(HOME, 'cache')
 
 // 自管模式下 root 没填时，扫描本机各插件数据目录里的配置，探测 Breeze 安装目录。
 // 任何语音插件只要按 { voice: { breeze: { root } } } 记过目录都能被发现；
-// 命中后必须校验 <root>/breeze-runtime.json 存在，避免误认到失效路径。
+// 命中后校验：<root>/breeze-runtime.json 存在，或桌面版布局（resources/runtime 下有
+// breeze-server.exe）——后者由 engine() 自动补写配置，所以这里也认。
+function looksLikeBreezeRoot(r) {
+  if (typeof r !== 'string' || !isAbsolute(r)) return false
+  if (existsSync(join(r, 'breeze-runtime.json'))) return true
+  if (existsSync(join(r, 'resources', 'runtime', 'breeze-server.exe'))) return true
+  if (existsSync(join(r, 'breeze-server.exe'))) return true
+  return false
+}
 function discoverRoot() {
   const bases = [
     join(homedir(), '.dsh', 'plugins-data'),
@@ -65,7 +73,7 @@ function discoverRoot() {
       try {
         const j = JSON.parse(readFileSync(f, 'utf8'))
         const r = j && j.voice && j.voice.breeze && j.voice.breeze.root
-        if (typeof r === 'string' && isAbsolute(r) && !seen.has(r) && existsSync(join(r, 'breeze-runtime.json'))) {
+        if (typeof r === 'string' && isAbsolute(r) && !seen.has(r) && looksLikeBreezeRoot(r)) {
           seen.add(r)
           log('自动发现安装目录（自管模式）：', r, '（来自', f + '）')
           return r
@@ -79,7 +87,7 @@ function discoverRoot() {
 const DEFAULTS = {
   mode: 'auto',                        // auto | connect | local
   endpoint: DEFAULT_ENDPOINT,          // 桌面版后端地址（connect/auto 用）
-  root: '',                            // 自管模式安装目录（含 breeze-runtime.json）
+  root: '',                            // 自管模式安装目录（含 breeze-server.exe；缺配置时自动补写）
   voice: 'qinglan',                    // 当前音色 id
   autoEmotion: true,                   // 按文本自动挑情绪
   emotionBackbone: true,               // 傲娇底色作为情绪主干
@@ -157,6 +165,7 @@ let service = null
 let serviceRoot = ''
 function engine() {
   if (!cfg.root) throw new Error('自管模式请先填写 Breeze 安装目录。')
+  ensureDesktopRuntime(cfg.root)          // 桌面版布局缺配置时自动补一份（已有则不动）
   if (service && serviceRoot === cfg.root) return service
   const runtime = readRuntime(cfg.root)   // 读 <root>/breeze-runtime.json 并校验
   service = null
@@ -170,6 +179,67 @@ function createServiceSafe(runtime) {
     log: { info: (m) => log(m), warn: (m) => log('[warn]', m) },
     onDispose: () => {},
   })
+}
+
+// ---- 桌面版布局 → 自动补写 breeze-runtime.json ------------------------------
+// 桌面版（含图形界面的安装包）本身不带 breeze-runtime.json：它靠 model-path.txt
+// + 命令行参数启动后端。自管模式需要这份 json 才能拿到 exe/model 路径，所以在
+// 发现是桌面版布局时按真实结构补一份，让用户不必手写。只补缺失的，绝不覆盖已有。
+// 只返回 root 目录内的模型绝对路径（引擎的 file() 不允许模型跑到根目录之外）。
+function desktopModel(root) {
+  const inside = (p) => {
+    const r = relative(root, p)
+    return !!r && !r.startsWith('..') && !isAbsolute(r)
+  }
+  // 1) model-path.txt 第一行（桌面版切换模型时写的绝对路径），仅当它就在安装目录内
+  try {
+    const m = readFileSync(join(root, 'model-path.txt'), 'utf8').split(/\r?\n/)[0].trim()
+    if (m && isAbsolute(m) && inside(m) && existsSync(m) && /\.gguf$/i.test(m)) return m
+  } catch { /* 没有标记文件 */ }
+  // 2) 扫安装目录里常见模型位置，优先推荐档 q4_k
+  const dirs = [join(root, 'models'), join(root, 'resources', 'runtime'), root]
+  const found = []
+  for (const d of dirs) {
+    try {
+      for (const name of readdirSync(d)) {
+        const full = join(d, name)
+        if (/\.gguf$/i.test(name) && inside(full) && existsSync(full)) found.push(full)
+      }
+    } catch { /* 目录不存在 */ }
+  }
+  if (!found.length) return ''
+  found.sort((a, b) => {
+    const pa = /q4_k\.gguf$/i.test(a) ? 0 : 1
+    const pb = /q4_k\.gguf$/i.test(b) ? 0 : 1
+    return pa - pb
+  })
+  return found[0]
+}
+function ensureDesktopRuntime(root) {
+  if (!root) return false
+  if (existsSync(join(root, 'breeze-runtime.json'))) return true   // 已有，绝不覆盖
+  // 桌面版引擎在 resources/runtime 下；也兼容引擎就在根目录的旧布局
+  const exe = existsSync(join(root, 'resources', 'runtime', 'breeze-server.exe'))
+    ? join(root, 'resources', 'runtime', 'breeze-server.exe')
+    : (existsSync(join(root, 'breeze-server.exe')) ? join(root, 'breeze-server.exe') : '')
+  if (!exe) return false                                          // 不是 Breeze 安装目录
+  const model = desktopModel(root)
+  if (!model) { log('桌面版安装未找到模型，无法自动补写配置：', root); return false }
+  const json = {
+    root,
+    port: 18370,                                                  // 自管用自己的端口，避开桌面版 18099
+    exe: relative(root, exe).replace(/\\/g, '/'),
+    model: relative(root, model).replace(/\\/g, '/'),
+    disableCoopmat: false,
+  }
+  try {
+    writeFileSync(join(root, 'breeze-runtime.json'), JSON.stringify(json, null, 2), 'utf8')
+    log('已按桌面版布局自动补写 breeze-runtime.json：', root)
+    return true
+  } catch (e) {
+    log('自动补写配置失败：', e && e.message ? e.message : e)
+    return false
+  }
 }
 
 // ---- 音色清单 --------------------------------------------------------------
