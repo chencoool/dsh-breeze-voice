@@ -240,7 +240,7 @@ audio[data-bv-audio]{height:34px;max-width:100%;}
           h(Row, { key: 'root', label: '安装目录', hint: 'Breeze TTS 2 的实际安装目录（里面要有 breeze-runtime.json 和 voices 文件夹）。' },
             h('input', {
               'data-bv-input': '', 'data-wide': '', type: 'text',
-              value: draft.root, placeholder: 'J:\\BreezeTTS2',
+              value: draft.root, placeholder: 'D:\\Breeze TTS 2',
               onChange: (e) => set('root', e.target.value),
             }),
           ),

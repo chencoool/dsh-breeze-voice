@@ -47,41 +47,52 @@
 
 完整的接入方式、接口签名和示例见 [集成说明](docs/INTEGRATION.md)。
 
+## 安装本插件（线上仓库）
+
+本插件托管在 GitHub 仓库 `chencoool/dsh-breeze-voice`。用 DSH 自带的插件命令，从仓库安装到你正在用的 profile：
+
+```powershell
+dsh plugin --profile <你的profile名> add github:chencoool/dsh-breeze-voice
+```
+
+桌面端用的一般是 `desktop` profile：
+
+```powershell
+dsh plugin --profile desktop add github:chencoool/dsh-breeze-voice
+```
+
+装完**重启 DSH**，设置侧栏出现「本地语音」页。
+
+> 当前仓库为私有，安装前需确保本机已登录有该仓库权限的账号（`gh auth login`）；仓库公开后任何人都能直接装。
+> 开发调试时也可以走本地目录安装：DSH「插件 → 添加插件」选本插件目录即可。
+
 ## 相关资源（Breeze TTS 2 本体）
 
-本插件只负责「把本地 Breeze 音色提供给 DSH 使用」，**不自带**语音引擎和模型，需自行安装 Breeze TTS 2：
+本插件只负责「把本地 Breeze 音色提供给 DSH 使用」，**不自带**语音引擎和模型。Breeze TTS 2 桌面版需自行从仓库下载安装：
 
 | 资源 | 地址 |
 |---|---|
+| **Breeze TTS 2 桌面版（安装包从这里下）** | https://github.com/dkvkvk/breeze-tts-2-desktop |
+| 桌面版安装包（Releases 页的 `BreezeTTS2-Setup-*.exe`，约 131 MB） | https://github.com/dkvkvk/breeze-tts-2-desktop/releases |
+| 上游后端项目（HoppouAI，非官方 C++ 实现） | https://github.com/HoppouAI/Breeze-TTS-2.cpp |
 | 原模型（BreezeBlue） | https://huggingface.co/BreezeBlue/Breeze-TTS-2 |
-| C++ 实现项目（HoppouAI，第三方、非官方发行版） | https://github.com/HoppouAI/Breeze-TTS-2.cpp |
-| C++ 项目发行包（预编译程序） | https://github.com/HoppouAI/Breeze-TTS-2.cpp/releases |
 | GGUF 量化模型 | https://huggingface.co/HoppouAI/Breeze-TTS-2.cpp |
 
 **国内镜像（原始站连不上时用）**：
 
-- Hugging Face 模型下载：设置环境变量 `HF_ENDPOINT=https://hf-mirror.com`，再用 `huggingface-cli download` / `hf download` 下载；也可直接把上面 `huggingface.co/...` 的域名替换成 `hf-mirror.com` 在浏览器打开。
-- GitHub Release 下载加速：把 release 资产链接贴到 https://ghproxy.net/ 加速（例如 `https://ghproxy.net/https://github.com/HoppouAI/Breeze-TTS-2.cpp/releases/download/...`）。
+- Hugging Face 模型：桌面版首次启动会内置 `HuggingFace → hf-mirror → hf-mirror.net` 自动回退下载；手动下可设 `HF_ENDPOINT=https://hf-mirror.com`，或把 `huggingface.co/...` 域名换成 `hf-mirror.com` 打开。
+- GitHub Release 下载加速：把 release 资产链接贴到 https://ghproxy.net/ 加速（如 `https://ghproxy.net/https://github.com/dkvkvk/breeze-tts-2-desktop/releases/download/...`）。
 
-> 注意：软件代码许可 ≠ 模型/声音的商用许可。商用前请核对模型和各音色的许可条款；引擎、Tokenizer、GGUF 模型是分开的文件，光下 GGUF 跑不起来。
+> 许可提醒：桌面版代码 Apache-2.0；Breeze TTS 2 模型权重为 **BreezeBlue Research and Non-Commercial License，仅限非商业研究**。商用前请核对模型和各音色的许可条款。
 
-## 本机安装包（给你手上的那份）
+## 下载安装 Breeze TTS 2（安装路径你自己选）
 
-如果这台机器已经装过，直接从这里复用即可，不用重新下载：
+1. 到桌面版 [Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases/latest) 下载 `BreezeTTS2-Setup-*.exe`（约 131 MB，自带运行时，不用另装 WebView2 / .NET）。
+2. 双击安装，**安装目录完全由你决定**：默认是 `D:\Breeze TTS 2`，安装向导的目录输入框可以直接键入或粘贴任意路径；只填盘符（如 `D:\`）会自动补成 `D:\Breeze TTS 2`。
+3. 首次启动会**自动下载** `breeze-tts-2-q4_k.gguf`（约 2.4 GB），断点续传 + 镜像回退，界面有进度；模型放在安装目录 `models\`，音色放在 `voices\`。
+4. 装好后打开本插件设置页「本地语音 → 安装目录」，填**你刚才选的那个安装目录**（要含 `breeze-runtime.json`、`voices\`、`models\`）。填一次即可，之后插件会自动记住；没填对的话音色下拉只会显示几个默认项。
 
-| 项目 | 路径 / 值 |
-|---|---|
-| 安装包（可直接双击安装） | `J:\BreezeTTS2-Setup-2.2.0.exe` |
-| 已安装目录 | `J:\BreezeTTS2` |
-| 安装版本 | Breeze TTS 2 · 2.2.0 |
-| 当前模型 | `J:\BreezeTTS2\models\breeze-tts-2-q6_k.gguf`（另有 q4_k 可选） |
-| 运行配置 | `J:\BreezeTTS2\breeze-runtime.json` |
-
-> 上面是**本机实测路径**：换一台机器时把 `J:\BreezeTTS2` 换成你自己的安装目录，在设置页「本地语音 → 安装目录」填一次即可（或让插件自动探测）。
-
-## 安装
-
-用 DSH 的 bundle 安装（或把本目录作为 `@local/dsh-breeze-voice` 放进 profile 的 `dsh.profile.bundles`）。安装后重启 DSH，设置侧栏出现「本地语音」页。
+> 文档不写死任何本机路径——以你实际安装时选的目录为准，在设置页告诉本插件即可。若桌面版没有自动生成 `breeze-runtime.json`，需按 `engine/service.mjs` 里的字段格式（`exe` / `model` / `port` 等）补一份到安装目录。
 
 ## 版权
 

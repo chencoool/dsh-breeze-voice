@@ -18,8 +18,8 @@ DSH 核心目前**没有统一的语音输出（TTS）服务 seam**——只有�
 
 ## 前提
 
-1. 装好本插件（`@local/dsh-breeze-voice`），重启 DSH。
-2. 本机装好 Breeze TTS 2（有 `breeze-runtime.json`、模型、`.breeze` 音色文件）。本插件会自动从本机常见配置里探测安装目录，也可在设置页「本地语音 → 安装目录」手动填。详见 README 的「相关资源」与「本机安装包」章节。
+1. 装好本插件：`dsh plugin --profile <你的profile名> add github:chencoool/dsh-breeze-voice`，装完重启 DSH。
+2. 本机装好 Breeze TTS 2：从 [dkvkvk/breeze-tts-2-desktop 的 Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases) 下载 `BreezeTTS2-Setup-*.exe`，安装目录自己选。装好后应有 `breeze-runtime.json`、模型、`.breeze` 音色文件；本插件会自动探测安装目录，也可在设置页「本地语音 → 安装目录」手动填。详见 README 的「下载安装 Breeze TTS 2」章节。
 3. 确认音色已就绪：设置页音色下拉里标着「本机」的项就是能直接用的；标「还没建好」的要先设计生成 `.breeze` 文件。
 
 ---
