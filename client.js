@@ -2,8 +2,9 @@
  * dsh-breeze-voice —— 浏览器半端（设置里的一页）
  * ============================================================================
  * 主界面参考同类语音设置的设计结构：
- *   音色 / 自动情绪 / 傲娇底色 / 模型判断情绪 / 空闲卸载 / 空闲多久卸载 /
- *   安装目录 / 显存(卸载·加载)。另加一个试听按钮和状态栏。
+ *   连接方式 / 接口地址 / 音色 / 自动情绪 / 傲娇底色 / 模型判断情绪 /
+ *   空闲卸载 / 空闲多久卸载 / 安装目录(自管) / 显存(卸载·加载)。
+ *   另加试听按钮和状态栏。连接方式=自动时探测桌面版 18099，连不上退回自管。
  *
  * client bundle 是自注册脚本（不是 ESM）：
  *   window.__ModuleLoader__.load({ id:'<包名>', factory:(require)=>({inject,apply}) })
@@ -32,6 +33,7 @@ window.__ModuleLoader__.load({
     }))
 
     const DEFAULTS = {
+      mode: 'auto', endpoint: 'http://127.0.0.1:18099',
       root: '', voice: 'qinglan', autoEmotion: true, emotionBackbone: true,
       emotionModel: false, unloadIdle: true, unloadIdleMinutes: 5, rate: 1,
     }
@@ -185,14 +187,50 @@ audio[data-bv-audio]{height:34px;max-width:100%;}
       }
 
       const voiceOptions = voices.length
-        ? voices.map((v) => ({ value: v.id, label: v.name + (v.ready === false ? '（还没建好）' : '') + (v.description ? ' · ' + v.description : '') }))
-        : [{ value: draft.voice || '', label: voices.length ? '正在读音色…' : '（先在下面填安装目录）' }]
+        ? voices.map((v) => ({
+          value: v.id,
+          label: v.name + (v.kind === 'reference' ? '（桌面版）' : (v.ready === false ? '（还没建好）' : '')) + (v.description ? ' · ' + v.description : ''),
+        }))
+        : [{ value: draft.voice || '', label: voices.length ? '正在读音色…' : '（先连桌面版或填安装目录）' }]
+
+      const isConnect = stat.mode === 'connect' || (draft.mode === 'connect')
 
       return h('div', { 'data-bv-page': '' },
         h('h2', { 'data-bv-h': '' }, '本地语音 · Breeze TTS 2'),
-        h('p', { 'data-bv-sub': '' }, '本机跑，音色和情绪在下面选；装好后所有需要语音的插件都能认出这些音色。'),
+        h('p', { 'data-bv-sub': '' }, '连桌面版或本机自管，音色和情绪在下面选；语音插件装上本插件后都能认出这些音色。'),
 
         h('div', { 'data-bv-card': '' },
+          // b0 连接方式
+          h(Row, { key: 'mode', label: '连接方式', hint: '自动：桌面版后端（18099）活着就连它，否则本机自管；连接模式把模型/下载/显存交给桌面版界面。' },
+            h('select', {
+              'data-bv-input': '', value: draft.mode,
+              onChange: (e) => set('mode', e.target.value),
+              style: { width: 150 },
+            },
+              h('option', { value: 'auto' }, '自动（推荐）'),
+              h('option', { value: 'connect' }, '连桌面版'),
+              h('option', { value: 'local' }, '本机自管'),
+            ),
+          ),
+
+          // b0b 接口地址（连接/自动模式）
+          (draft.mode !== 'local') ? h(Row, { key: 'endpoint', label: '桌面版接口', hint: 'Breeze TTS 2 桌面版后端地址，一般不用改。' },
+            h('input', {
+              'data-bv-input': '', 'data-wide': '', type: 'text',
+              value: draft.endpoint, placeholder: 'http://127.0.0.1:18099',
+              onChange: (e) => set('endpoint', e.target.value),
+            }),
+          ) : null,
+
+          // b0c 安装目录（自管模式）
+          (draft.mode === 'local') ? h(Row, { key: 'root', label: '安装目录', hint: '自管模式的 Breeze 安装目录（里面要有 breeze-runtime.json 和 voices 文件夹）。' },
+            h('input', {
+              'data-bv-input': '', 'data-wide': '', type: 'text',
+              value: draft.root, placeholder: 'D:\\Breeze TTS 2',
+              onChange: (e) => set('root', e.target.value),
+            }),
+          ) : null,
+
           // b1 音色
           h(Row, { key: 'voice', label: '音色', hint: '选一个本机音色；标「还没建好」的要先现场设计生成 .breeze 文件。' },
             h('select', {
@@ -236,19 +274,12 @@ audio[data-bv-audio]{height:34px;max-width:100%;}
             }, [1, 3, 5, 10, 15, 30].map((n) => h('option', { key: n, value: n }, n + ' 分钟'))),
           ),
 
-          // b7 安装目录
-          h(Row, { key: 'root', label: '安装目录', hint: 'Breeze TTS 2 的实际安装目录（里面要有 breeze-runtime.json 和 voices 文件夹）。' },
-            h('input', {
-              'data-bv-input': '', 'data-wide': '', type: 'text',
-              value: draft.root, placeholder: 'D:\\Breeze TTS 2',
-              onChange: (e) => set('root', e.target.value),
-            }),
-          ),
-
-          // b8 显存
-          h(Row, { key: 'gpu', label: '显存', hint: '手动加载/卸载模型进程；卸载只结束进程，模型和音色文件都不动。' },
+          // b8 显存（仅自管模式；连接模式交给桌面版）
+          !isConnect ? h(Row, { key: 'gpu', label: '显存', hint: '手动加载/卸载模型进程；卸载只结束进程，模型和音色文件都不动。' },
             h('button', { 'data-bv-btn': '', type: 'button', disabled: busy, onClick: () => act('unload') }, '卸载'),
             h('button', { 'data-bv-btn': '', 'data-primary': '', type: 'button', disabled: busy, onClick: () => act('load') }, '加载'),
+          ) : h(Row, { key: 'gpu', label: '显存 / 模型', hint: '连接模式下由 Breeze TTS 2 桌面版界面管理（下载、切换量化档、显存）。' },
+            h('span', { 'data-bv-hint': '' }, '交给桌面版 →'),
           ),
         ),
 
@@ -258,9 +289,10 @@ audio[data-bv-audio]{height:34px;max-width:100%;}
         // 状态栏
         h('div', { 'data-bv-status': '' },
           h('span', { 'data-bv-dot': '', 'data-on': stat.loaded ? '' : undefined }),
-          stat.loaded ? '模型已加载' : '模型未加载',
-          ' · 安装目录：' + (stat.configured ? (stat.root || '—') : '未设置'),
-          ' · 当前音色：' + (draft.voice || '—'),
+          (stat.mode === 'connect' ? '连接模式' : stat.mode === 'local' ? '自管模式' : '检测中'),
+          ' · ' + (stat.loaded ? (stat.mode === 'connect' ? '桌面版已连接' : '模型已加载') : (stat.message || '服务未就绪')),
+          ' · ' + (stat.mode === 'connect' ? ('接口：' + (stat.endpoint || '—')) : ('目录：' + (stat.root || '未设置'))),
+          ' · 音色：' + (draft.voice || '—'),
         ),
 
         h('div', { 'data-bv-toast': '', 'data-err': err ? '' : undefined }, msg || ' '),

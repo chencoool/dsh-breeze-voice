@@ -19,8 +19,8 @@ DSH 核心目前**没有统一的语音输出（TTS）服务 seam**——只有�
 ## 前提
 
 1. 装好本插件：`dsh plugin --profile <你的profile名> add github:chencoool/dsh-breeze-voice`，装完重启 DSH。
-2. 本机装好 Breeze TTS 2：从 [dkvkvk/breeze-tts-2-desktop 的 Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases) 下载 `BreezeTTS2-Setup-*.exe`，安装目录自己选。装好后应有 `breeze-runtime.json`、模型、`.breeze` 音色文件；本插件会自动探测安装目录，也可在设置页「本地语音 → 安装目录」手动填。详见 README 的「下载安装 Breeze TTS 2」章节。
-3. 确认音色已就绪：设置页音色下拉里标着「本机」的项就是能直接用的；标「还没建好」的要先设计生成 `.breeze` 文件。
+2. **推荐**装好 Breeze TTS 2 桌面版：从 [dkvkvk/breeze-tts-2-desktop 的 Releases](https://github.com/dkvkvk/breeze-tts-2-desktop/releases) 下载 `BreezeTTS2-Setup-*.exe`，安装目录自己选，**启动桌面版**。本插件「连接方式」保持「自动」，探测到桌面版后端（`127.0.0.1:18099`）就自动连上——连接模式不用填安装目录、不用 `breeze-runtime.json`，音色来自桌面版克隆库（`voices\`）和内置描述式预设。若你没有桌面版、用的是旧的本机自管引擎，才需要在设置页填安装目录（含 `breeze-runtime.json`）。详见 README。
+3. 确认音色已就绪：连接模式下，音色标「（桌面版）」的是桌面版克隆音色（直接可用），其余是内置描述式预设；自管模式下标「本机」的可直接用，标「还没建好」的要先生成 `.breeze` 文件。
 
 ---
 
@@ -28,8 +28,8 @@ DSH 核心目前**没有统一的语音输出（TTS）服务 seam**——只有�
 
 这里用 **dsh-pet** 当一个具体例子——它维护自己的语音注册表 `petApi7340.voice`，下拉就从这里读。本插件启动时会把全部音色注册进去，于是 dsh-pet 的下拉里直接出现「本机 Breeze TTS 2」这一组：
 
-- 音色 id 形如 `breeze/dafeiyu_mihuban`、`breeze/aojiao_daxiaojie`；
-- 播放时走 dsh-pet 正常的 `voice.speak` 流程，底层会调到本插件的合成函数；
+- 音色 id 形如 `breeze/qinglan`、`breeze/<桌面版克隆音色>`；
+- 播放时走 dsh-pet 正常的 `voice.speak` 流程，底层会调到本插件的合成函数（连接模式下自动转成桌面版 multipart 请求）；
 - 注册契约（dsh-pet 的 `voice.register`）如下，如果你的插件也有类似的注册表，照这个格式注册即可：
 
 ```js
@@ -44,18 +44,20 @@ const def = {
   voices: bv.listVoices().map(v => ({
     id: v.id,
     name: v.name,
-    tag: (v.ready ? '本机' : '未建好') + (v.description ? ' · ' + v.description : ''),
+    tag: (v.kind === 'reference' ? '桌面版' : (v.ready ? '本机' : '未建好'))
+       + (v.description ? ' · ' + v.description : ''),
   })),
-  synthesize: async ({ text, voice }) => (await bv.speak(text, voice)).bytes,
+  synthesize: async ({ text, voice, signal }) => (await bv.speak(text, voice, { signal })).bytes,
 }
 
 myVoiceRegister(def)                  // 换成你自己的注册函数
 ```
 
 要点：
-- `synthesize` 收到的 `voice` 是**裸 id**（不带 `breeze/` 前缀），直接传给 `bv.speak` 即可；
+- `synthesize` 收到的 `voice` 是**裸 id**（不带 `breeze/` 前缀），直接传给 `bv.speak` 即可；有 `signal` 就透传，便于上游取消。
 - `format` 填 `'wav'`，`timeoutMs` 建议 ≥ 200000，否则本机合成慢时会被超时掐断；
-- `bv.listVoices()` 里 `ready === false` 的音色还没生成 `.breeze` 文件，点了会合成失败，建议在下拉里标注出来；
+- `bv.listVoices()` 每项结构见方式 B，连接模式下 `kind === 'reference'` 表示桌面版克隆音色、`ready` 恒为 true；自管模式 `ready === false` 的项还没生成 `.breeze` 文件，点了会失败，建议在下拉里标注；
+- 音色清单可能延迟刷新（连接模式首次合成前会主动拉一次桌面版音色），可在音色变更时调 `bv.refreshRegistration()` 重注册；
 - 如果 dsh-pet 被 `disabled`，它的注册表不存在，本插件的自动注册会静默跳过——这只影响「dsh-pet 这个例子」，不影响其它接入方式。
 
 ---
@@ -70,15 +72,21 @@ myVoiceRegister(def)                  // 换成你自己的注册函数
 const bv = ctx.get('breezeVoice', true)   // 第二个参数 true = 软取，没装也不抛错
 if (!bv) return                            // 本插件没装 / 还没就绪
 
-// 1) 音色清单：返回数组，每项 { id, name, description, instruction, seed, ready }
+// 1) 音色清单：返回数组（同步，取缓存），每项：
+//    { id, name, description, instruction, seed, ready, kind, refId? }
+//    kind='reference' 表示桌面版克隆音色（合成走 voice_id=refId，ready 恒 true）；
+//    kind='instruction' 表示描述式音色（合成走 instruction，注意可能未建好）。
 const voices = bv.listVoices()
 
-// 2) 运行状态：{ root, configured, loaded, lastLoadedAt, lastUsedAt, voice }
+// 2) 运行状态：
+//    连接模式 { mode:'connect', endpoint, configured, loaded, message, voice }
+//    自管模式 { mode:'local', root, configured, loaded, lastLoadedAt, lastUsedAt, voice }
 const status = await bv.status()
 
 // 3) 合成语音：speak(text, voiceId, opts?) -> { bytes, voice, emotion }
-//    bytes 是 WAV（24kHz 单声道 16bit）的 Buffer；voiceId 用不带前缀的裸 id
-const { bytes, voice, emotion } = await bv.speak('你好呀', 'dafeiyu_mihuban')
+//    bytes 是 WAV（24kHz 单声道 16bit）的 Buffer；voiceId 用不带前缀的裸 id；
+//    opts 可传 { signal } 便于取消。两种模式对外接口一致，内部自动分流。
+const { bytes, voice, emotion } = await bv.speak('你好呀', 'dafeiyu_mihuban', { signal })
 
 // 4) 音色清单变了（比如用户改了配置）时，刷新注册：
 bv.refreshRegistration()
@@ -152,10 +160,13 @@ A：DSH 没有全局 TTS 注册表，不会自动出现在任何插件里。需�
 A：加载顺序问题。用 `ctx.inject(['breezeVoice'], fn)` 等它就绪后再注册，别在 `apply` 里假设它一定已经存在。
 
 **Q：合成报「请先填写安装目录」？**
-A：本插件没自动探测到 Breeze 目录。去设置页「本地语音 → 安装目录」手动填（要含 `breeze-runtime.json`），保存后重试。
+A：这是**自管模式**才有的提示——本插件没自动探测到旧版 Breeze 目录。两个解法：①推荐装 Breeze 桌面版并保持「连接方式=自动」，连接模式不需要安装目录；②确实要用自管模式，就去设置页「本地语音 → 安装目录」手动填（要含 `breeze-runtime.json`），保存后重试。
 
 **Q：音色标着「还没建好」能用吗？**
-A：不能。那是预设/自定义项还没生成对应的 `.breeze` 文件，需要先在 Breeze 侧设计生成。
+A：不能。那是自管模式下预设/自定义项还没生成对应的 `.breeze` 文件，需要先在 Breeze 侧设计生成。连接模式的桌面版克隆音色标「（桌面版）」，可直接用。
+
+**Q：连接模式和自管模式怎么选？装了桌面版还要填目录吗？**
+A：「连接方式=自动」即可：桌面版后端开着就走连接模式（不填目录、不碰 `breeze-runtime.json`，模型和显存交给桌面版），没开就退回自管模式。也可手动锁定为「连桌面版」或「本机自管」。
 
 **Q：多个 TTS 插件都想注册，ID 撞了怎么办？**
 A：provider id 用 kebab-case 且保证唯一（本插件固定用 `breeze`）。注册表遇到重复 id 通常会直接抛错，注册前先确认没占用。
