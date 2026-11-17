@@ -22,12 +22,14 @@
 
 ## 它做什么
 
-- **设置页主界面**：连接方式 / 接口地址 / 音色 / 自动情绪 / 傲娇底色 / 模型判断情绪 / 空闲卸载 / 空闲多久卸载 / 安装目录 / 显存，外加试听按钮和状态栏。
+- **桌面版安装入口**：设置页「本地语音」顶部有一张「桌面版安装」卡片。未检测到桌面版时给官方下载链接（安装路径你自己选）；检测到后显示安装目录与「自动配置链路」按钮，一键把安装目录写进配置并刷新音色。要卸载时提示去安装目录运行卸载器。装没装实时查 Windows 卸载注册表，不记标记——卸载后重启 DSH 会自动回到待安装态；若你从没手填过安装目录，桌面版装好后重启 DSH 会自动认出并配好链路。
+- **设置页主界面**：连接方式 / 接口地址 / 音色 / 情绪语气 / 空闲卸载 / 空闲多久卸载 / 安装目录 / 显存，外加试听按钮和状态栏。
 - **连接模式合成**：用 `multipart/form-data` 把文字/音色发给桌面版（字段 `text` / `instruction` / `voice_id`），把返回的 24 kHz 单声道 16 bit 裸 PCM 封成 WAV；不联网、不调用在线 TTS。
 - **音色来源**：连接模式下，音色来自桌面版的克隆音色库（`voices\`，靠 `voice_id` 驱动）+ 内置描述式预设（靠 `instruction` 驱动）；自管模式下音色来自安装目录的 `custom-presets.json`。
 - **添加音色（连接模式）**：在设置页「音色库 · 添加克隆音色」里上传一段参考音频（自动统一成 24 kHz 单声道 16 bit WAV，最长 30 秒）+ 填逐字稿和名字，插件把它透传到桌面版的 `/v1/voices`，**音色文件直接存进桌面版的 `voices\` 库**。这样桌面版和 DSH 两边看到的是同一份音色，换音色不用两头折腾；克隆音色还能在列表里一键删除。
-- **情绪**：按文字关键词 + 大肥鱼人设骨架离线挑语气，音色身份始终保留在最前。
+- **情绪语气**：`toneMode` 三档——`off` 不加情绪；`keyword`（默认）按文字关键词挑语气，0 token、离线可用；`model` 先读聊天插件（Aurabot）落盘的心情值 `mood.json`、再用 DSH 当前默认模型把「这句该怎么念」写成一句自然语言提示（约百来 token，同一句+同心情+同音色缓存 10 分钟，模型出错或没配聊天插件自动退回关键词）。音色身份始终排最前；**人设/性格不在这里**——那由聊天插件决定，本插件只管情绪化的念法。28 个纯情绪档 + 撒娇/戏谑/温柔 3 个社交语气档，不含"傲娇"档（那属于人设）。
 - **通用注册**：把音色以 `breeze/音色id` 注册进 dsh-pet 的语音注册表（仅当 dsh-pet 启用时），并以 `breezeVoice` 服务暴露 `listVoices / status / speak / refreshRegistration` 给任何愿意接入的插件。
+- **接入其它本地语音插件**：设置页「接入其它本地语音插件」卡片会检测本机装了哪些**本地**语音插件。dsh-pet 的私有接口 `petApi7340.voice` 已收录、自动接好（DSH 核心层并没有通用 TTS 标准接口，这是 dsh-pet 自己的服务）；其它插件（如 Aurabot）本插件**绝不往它目录里塞脚本、不绕开它原来的音色/情绪设置**——只在卡片里给出「其他 HTTP 接口」的手动接入参数（地址/方式/请求头/请求体），你自己去那个插件面板填一次。DSH 重启后 web 端口会变：**只要你已经用「其他 HTTP 接口」接过本插件**，本插件会在启动和打开设置页时走它的官方保存接口，把地址里的端口自动更新成当前端口（只改端口，音色/情绪/请求方式/请求体一律不动；没接过本插件时一个字都不写）。音色/情绪/连接方式仍全在本插件设置页管；本插件只做本地语音，云端 TTS 不在范围。
 
 ## 配置
 
@@ -39,9 +41,7 @@
 | `endpoint` | `http://127.0.0.1:18099` | 桌面版后端接口地址（连接模式用） |
 | `root` | `''` | 自管模式的 Breeze 安装目录（含 `breeze-server.exe` 和 `voices/`）；桌面版布局缺 `breeze-runtime.json` 时插件会自动补写；留空会自动探测 |
 | `voice` | `qinglan` | 当前音色 id |
-| `autoEmotion` | `true` | 按文字自动挑情绪 |
-| `emotionBackbone` | `true` | 傲娇底色作为情绪主干 |
-| `emotionModel` | `false` | 预留：当前版本仍用离线关键词推断，不额外调模型 |
+| `toneMode` | `keyword` | 情绪语气：`off`（关）/ `keyword`（关键词推断，0 token，默认）/ `model`（读聊天插件心情值 + 模型润色一句语气，约百来 token，带缓存）。旧配置里的 `autoEmotion`/`emotionBackbone`/`emotionModel` 三开关会自动迁移到这一项 |
 | `unloadIdle` | `true` | 自管模式空闲自动卸载模型释放显存 |
 | `unloadIdleMinutes` | `5` | 自管模式空闲多久卸载（1/3/5/10/15/30） |
 | `rate` | `1` | 语速（引擎暂不消费，保留给契约） |
@@ -57,6 +57,9 @@
 - `POST /preview` — `{text, voice}` → WAV 字节（面板试听）
 - `POST /voice/add` — multipart/form-data（`ref_audio` 参考 WAV + `ref_text` 逐字稿 + `name` 名字 + 可选 `description`）→ 透传到桌面版 `/v1/voices`，把音色存进桌面版音色库；需桌面版在跑
 - `POST /voice/delete` — `{id}` → 删除桌面版音色库里的一个克隆音色
+- `GET /install/status` — 检测桌面版装没装/装哪了（`installed` / `dir` / `uninstall` / `backendRunning` / `linked` / `downloadUrl`）
+- `POST /install/link` — 把检测到的安装目录写进配置并刷新链路；可带 `{dir}` 指定，不带则现场从卸载注册表检测
+- `GET /integrations` — 检测本机有哪些**本地**语音插件，给出手动接入参数，并顺带做一次端口同步：`{ok, plugins:[{id, kind, status, detail, dataDir}], httpGuide:{url, method, headers, body, note}, sync}`（`kind:'pet'` 自动接入；`kind:'manual-http'` 需手动接入。`httpGuide` 就是填进其它插件「其他 HTTP 接口」的参数；请求体不带 voice，念的时候跟随本页当前音色。`sync` 是本次端口同步结果：updated/unchanged/skipped）
 - `POST /unload` / `POST /load` — 自管模式手动卸载/加载；连接模式提示交给桌面版
 
 ## 让其它插件也用上这些音色
@@ -64,9 +67,10 @@
 本插件不会让所有语音插件**自动**出现音色（DSH 核心没有统一 TTS 注册表）。这里以 **dsh-pet** 为例说明两种接法：
 
 - **例：dsh-pet** 已经读它自己的语音注册表，本插件启动时会把音色注册进去，于是 dsh-pet 的下拉直接出现「本机 Breeze TTS 2」这一组——这是「零改动自动生效」的例子。
+- **有「其他 HTTP 接口」的插件（如 Aurabot）**：在设置页「接入其它本地语音插件」卡片复制手动接入参数，去那个插件的语音设置里选「其他 HTTP 接口」，填：接口地址=卡片给的 `url`、请求方式=`POST`、请求头=`Content-Type: application/json`、请求体=`{"text":"{text}"}`。保存即可。**本插件不写它的任何文件**，所以不会动它原来的音色/情绪设置；音色、情绪、连接方式仍全在本页管。注意 DSH 重启后 web 端口可能变，地址要跟着更新。具体见 [集成说明](docs/INTEGRATION.md)。**别的插件也要端口自动同步？** 内置同步只覆盖了 Aurabot；其它插件可以点卡片里的「复制给 agent」按钮，把一段指令粘到 agent 对话窗口，让 agent 现场读那个插件源码、适配它的配置（插件本体不硬记各家格式），详见 [让 Agent 帮你同步端口](docs/AGENT-PORT-SYNC.md)。
 - **其它插件** 可主动接入本插件暴露的 `breezeVoice` 服务，或直接调 `/api/breeze-voice` HTTP 接口。
 
-完整的接入方式、接口签名和示例见 [集成说明](docs/INTEGRATION.md)。
+完整的接入方式、接口签名和示例见 [集成说明](docs/INTEGRATION.md)。本插件只管**本地**语音，云端 TTS 插件不在支持范围。
 
 ## 安装本插件（线上仓库）
 

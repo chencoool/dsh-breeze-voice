@@ -34,8 +34,8 @@ window.__ModuleLoader__.load({
 
     const DEFAULTS = {
       mode: 'auto', endpoint: 'http://127.0.0.1:18099',
-      root: '', voice: 'qinglan', autoEmotion: true, emotionBackbone: true,
-      emotionModel: false, unloadIdle: true, unloadIdleMinutes: 5, rate: 1,
+      root: '', voice: 'qinglan', toneMode: 'keyword',
+      unloadIdle: true, unloadIdleMinutes: 5, rate: 1,
     }
 
     // DSH 默认风格：卡片/字段/控件全部用 --dsw-alias-* token（带 fallback）。
@@ -86,6 +86,7 @@ select[data-bv-input]{color-scheme:light dark}
 select[data-bv-input] option,select[data-bv-input] optgroup{
   background-color:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
 audio[data-bv-audio]{height:34px;max-width:100%}
+[data-bv-sync][data-ok]{color:var(--dsw-alias-state-success-primary, #4caf50)}
 `
 
     // 把任意音频转成 24kHz / 单声道 / 16bit WAV（桌面版音色克隆的入参规格）。
@@ -178,6 +179,12 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       const [err, setErr] = useState(false)
       const [loading, setLoading] = useState(true)
       const [busy, setBusy] = useState(false)
+      // 桌面版安装状态
+      const [install, setInstall] = useState({ installed: false, dir: '', version: '', backendRunning: false, linked: false, downloadUrl: '' })
+      // 其它本地语音插件检测 + 手动接入参数
+      const [integrations, setIntegrations] = useState([])
+      const [httpGuide, setHttpGuide] = useState(null)
+      const [portSync, setPortSync] = useState(null)   // 端口自动同步结果
       // 添加音色表单
       const [addFile, setAddFile] = useState(null)
       const [addName, setAddName] = useState('')
@@ -204,6 +211,20 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         } catch (e) {
           toast('读取配置失败：' + (e && e.message ? e.message : e), true)
         } finally { if (mounted.current) setLoading(false) }
+        // 安装状态与配置分开读：即使 /config 失败也尽量显示安装入口
+        try {
+          const s = await jget('/install/status')
+          if (mounted.current && s && s.ok) setInstall(s)
+        } catch { /* 安装检测失败不影响面板 */ }
+        // 检测本机其它本地语音插件
+        try {
+          const g = await jget('/integrations')
+          if (mounted.current && g && g.ok) {
+            setIntegrations(Array.isArray(g.plugins) ? g.plugins : [])
+            if (g.httpGuide) setHttpGuide(g.httpGuide)
+            if (g.sync) setPortSync(g.sync)
+          }
+        } catch { /* 检测失败不影响面板 */ }
       }, [toast])
 
       useEffect(() => { reload() }, [reload])
@@ -276,6 +297,22 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         finally { setBusy(false) }
       }
 
+      const openDownload = () => {
+        const url = install.downloadUrl || 'https://github.com/dkvkvk/breeze-tts-2-desktop/releases'
+        try { window.open(url, '_blank', 'noopener') } catch { /* 忽略 */ }
+      }
+      const doLink = async () => {
+        setBusy(true); toast('正在检测桌面版并自动配置链路…')
+        try {
+          const r = await jpost('/install/link', install.dir ? { dir: install.dir } : {})
+          if (!r.ok) throw new Error(r.message || '配置失败')
+          toast('已配置好链路：' + r.root + '，音色已刷新。', false)
+          await reload()
+        } catch (e) { toast('自动配置失败：' + (e && e.message ? e.message : e), true) }
+        finally { setBusy(false) }
+      }
+
+
       const voiceOptions = voices.length
         ? voices.map((v) => ({
           value: v.id,
@@ -289,6 +326,34 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       return h('div', { 'data-bv-page': '' },
         h('h2', { 'data-bv-h': '' }, '本地语音 · Breeze TTS 2'),
         h('p', { 'data-bv-sub': '' }, '连接桌面版或本机自管，音色与情绪在下面选；其它语音插件接入本服务后即可共用这些音色。'),
+
+        // —— 桌面版安装卡片 ——
+        h('div', { 'data-bv-card': '' },
+          h('div', { 'data-bv-card__title': '' }, '桌面版安装'),
+          !install.installed
+            ? h('div', {},
+                h('div', { 'data-bv-row': '' },
+                  h('div', { 'data-bv-msg': '' },
+                    h('span', { 'data-bv-label': '' }, '尚未检测到 Breeze TTS 2 桌面版'),
+                    h('span', { 'data-bv-hint': '' }, '点下面按钮去官方仓库下载安装包，安装路径由你自己选；装好后回到这里会自动识别并配好链路。')),
+                  h('div', { 'data-bv-ctl': '' },
+                    h('button', { 'data-bv-btn': '', 'data-primary': '', type: 'button', onClick: openDownload }, '下载安装桌面版'))))
+            : h('div', {},
+                h('div', { 'data-bv-row': '' },
+                  h('div', { 'data-bv-msg': '' },
+                    h('span', { 'data-bv-label': '' },
+                      h('i', { 'data-bv-dot': '', 'data-on': install.backendRunning ? '' : null }),
+                      '已安装桌面版' + (install.version ? ' · v' + install.version : '')),
+                    h('span', { 'data-bv-hint': '' }, '安装目录：' + (install.dir || '（未知）'))),
+                  h('div', { 'data-bv-ctl': '' },
+                    h('button', {
+                      'data-bv-btn': '', 'data-primary': !install.linked, type: 'button',
+                      disabled: busy || install.linked, onClick: doLink,
+                    }, install.linked ? '链路已配好' : '自动配置链路'))),
+                h('div', { 'data-bv-hint': '' }, '合成方式由下方「连接方式」决定；装好桌面版、配置好模型即可使用。'),
+                h('div', { 'data-bv-row': '' },
+                  h('div', { 'data-bv-msg': '' },
+                    h('span', { 'data-bv-hint': '' }, '要卸载？请到安装目录运行卸载器（不会删除本插件）：' + (install.uninstall || (install.dir + '\\Uninstall Breeze TTS 2.exe'))))))),
 
         // —— 常规设置卡片 ——
         h('div', { 'data-bv-card': '' },
@@ -335,16 +400,16 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             }, preview.busy ? '合成中…' : '▶ 试听'),
           ),
 
-          h(Row, { key: 'autoEmotion', label: '自动情绪', hint: '按文字内容自动挑语气（傲娇、开心、撒娇…），只改语气不改音色。' },
-            h(Switch, { on: Boolean(draft.autoEmotion), onChange: (v) => set('autoEmotion', v) }),
-          ),
-
-          h(Row, { key: 'emotionBackbone', label: '傲娇底色', hint: '把大肥鱼的傲娇人设作为情绪主干；关掉则用中性档位描述。' },
-            h(Switch, { on: Boolean(draft.emotionBackbone), onChange: (v) => set('emotionBackbone', v) }),
-          ),
-
-          h(Row, { key: 'emotionModel', label: '模型判断情绪', hint: '预留开关：当前版本用关键词＋人设骨架离线推断，不额外调模型，保证断网也能说话。' },
-            h(Switch, { on: Boolean(draft.emotionModel), onChange: (v) => set('emotionModel', v) }),
+          h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气（0 token，默认）；模型润色：读聊天插件的心情值，让模型把这句该怎么念写成一句提示（约百来 token，结果缓存 10 分钟）。人设/性格由聊天插件决定，这里只管情绪化的念法。' },
+            h('select', {
+              'data-bv-input': '', value: draft.toneMode || 'keyword',
+              onChange: (e) => set('toneMode', e.target.value),
+              style: { width: 150 },
+            },
+              h('option', { value: 'off' }, '关闭'),
+              h('option', { value: 'keyword' }, '关键词推断（推荐）'),
+              h('option', { value: 'model' }, '模型润色语气'),
+            ),
           ),
 
           h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说话就结束模型进程，释放显存；下次说话会自动重新加载。' },
@@ -419,6 +484,65 @@ audio[data-bv-audio]{height:34px;max-width:100%}
               }, '删除'),
             )),
           ) : h('div', { 'data-bv-hint': '' }, '桌面版音色库里还没有克隆音色。'),
+        ),
+
+        // —— 接入其它本地语音插件卡片（只检测 + 给手动接入参数，不写别人目录）——
+        h('div', { 'data-bv-card': '' },
+          h('div', { 'data-bv-card__title': '' }, '接入其它本地语音插件'),
+          h('div', { 'data-bv-hint': '' }, '检测本机已装的本地语音插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。'),
+          integrations.length ? h('div', { 'data-bv-vlist': '' },
+            integrations.map((p) => h('div', { 'data-bv-vitem': '', key: p.id },
+              h('span', { title: p.detail }, p.name + ' · ' + p.detail),
+              h('span', { 'data-bv-hint': '' }, p.status === 'auto' ? '✓ 已接入' : '需手动接入'),
+            )),
+          ) : h('div', { 'data-bv-hint': '' }, '没检测到其它本地语音插件。'),
+          httpGuide ? h('div', { 'data-bv-manual': '' },
+            h('div', { 'data-bv-card__title': '' }, '手动接入参数（在其它插件的「其他 HTTP 接口」里填）'),
+            h('div', { 'data-bv-field': '' },
+              h('div', { 'data-bv-flabel': '' }, '接口地址'),
+              h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.url, onFocus: (e) => e.target.select() }),
+            ),
+            h('div', { 'data-bv-field': '' },
+              h('div', { 'data-bv-flabel': '' }, '请求方式'),
+              h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.method, onFocus: (e) => e.target.select() }),
+            ),
+            h('div', { 'data-bv-field': '' },
+              h('div', { 'data-bv-flabel': '' }, '请求头'),
+              h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.headers, onFocus: (e) => e.target.select() }),
+            ),
+            h('div', { 'data-bv-field': '' },
+              h('div', { 'data-bv-flabel': '' }, '请求体'),
+              h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.body, onFocus: (e) => e.target.select() }),
+            ),
+            h('button', {
+              'data-bv-btn': '', 'data-sm': '', type: 'button',
+              onClick: async () => {
+                const text = [httpGuide.url, httpGuide.method, httpGuide.headers, httpGuide.body].join('\n')
+                try { await navigator.clipboard.writeText(text); toast('参数已复制。', false) }
+                catch { toast('复制失败，请手动选中上面的输入框复制。', true) }
+              },
+            }, '复制全部参数'),
+            httpGuide.agentPrompt ? h('button', {
+              'data-bv-btn': '', 'data-sm': '', type: 'button',
+              onClick: async () => {
+                try { await navigator.clipboard.writeText(httpGuide.agentPrompt); toast('给 agent 的指令已复制，粘贴到 agent 对话窗口即可。', false) }
+                catch { toast('复制失败，完整说明见插件目录 docs/AGENT-PORT-SYNC.md。', true) }
+              },
+            }, '复制给 agent（自动适配其它插件）') : null,
+            h('div', { 'data-bv-hint': '' }, httpGuide.note),
+            portSync ? h('div', {
+              'data-bv-hint': '',
+              'data-bv-sync': '',
+              'data-ok': (portSync.ok || portSync.unchanged) ? '' : undefined,
+            }, portSync.updated
+              ? '✓ 已把新端口自动写回 aurabot：' + portSync.url
+              : portSync.unchanged
+                ? '✓ aurabot 接口地址已是当前端口，无需改动。'
+                : portSync.skipped
+                  ? '端口同步：' + (portSync.reason || '无需同步') + '（没改动它的设置）'
+                  : '端口同步失败：' + (portSync.message || '未知原因'))
+              : null,
+          ) : null,
         ),
 
         preview.url ? h('audio', { 'data-bv-audio': '', controls: true, ref: preview.audioRef, src: preview.url }) : null,
