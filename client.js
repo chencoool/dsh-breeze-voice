@@ -435,6 +435,77 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       )
     }
 
+    // —— 设置页导航图标：盖掉默认齿轮，换成音频波形（照同类插件的做法，纯内联 SVG，不依赖宿主包）——
+    const NAV_STYLE_TAG = 'dsh-breeze-voice/nav-icon.css'
+    const NAV_MARK = 'data-bv-nav'
+    const WAVE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M7 15v6"/><path d="M12 10v16"/><path d="M17 5v26"/><path d="M22 11v14"/><path d="M27 8v20"/><path d="M32 15v6"/></svg>'
+    const PANEL_SELECTOR = '[data-shortcut-modal="settings"]'
+    const LIST_SELECTOR = '[class*="navList"]'
+    const CELL_SELECTOR = '[class*="navCell"]'
+    const LABEL_SELECTOR = '[class*="navLabel"]'
+    function navMaskUri(svg) {
+      const source = String(svg || '').trim()
+      if (!source) return ''
+      return 'url("data:image/svg+xml,' + encodeURIComponent(source.split('currentColor').join('#000')) + '")'
+    }
+    function navCss(glyph) {
+      return [
+        '[' + NAV_MARK + '] [class*="navIcon"]{display:none}',
+        '[' + NAV_MARK + ']::before{content:"";flex:none;width:16px;height:16px;background-color:currentColor;-webkit-mask:' + glyph + ' center/16px 16px no-repeat;mask:' + glyph + ' center/16px 16px no-repeat}'
+      ].join('\n')
+    }
+    function installSectionNavIcon() {
+      const doc = typeof document === 'undefined' ? void 0 : document
+      const Observer = typeof MutationObserver === 'undefined' ? void 0 : MutationObserver
+      if (!doc || !Observer || !doc.body) return () => {}
+      const glyph = navMaskUri(WAVE_SVG)
+      if (!glyph) return () => {}
+      let injected = false
+      const injectNavCss = () => {
+        if (injected) return
+        if (doc.querySelector('style[data-plugin-css="' + NAV_STYLE_TAG + '"]')) { injected = true; return }
+        const tag = doc.createElement('style')
+        tag.dataset.plugin = 'dsh-breeze-voice'
+        tag.dataset.pluginCss = NAV_STYLE_TAG
+        tag.textContent = navCss(glyph)
+        doc.head.appendChild(tag)
+        injected = true
+      }
+      const markPanel = (panel) => {
+        try {
+          const list = panel.querySelector(LIST_SELECTOR)
+          if (!list) return
+          for (const cell of list.querySelectorAll(CELL_SELECTOR)) {
+            if (cell.getAttribute(NAV_MARK) !== null) continue
+            const label = cell.querySelector(LABEL_SELECTOR)?.textContent || ''
+            if (label.includes('本地语音')) cell.setAttribute(NAV_MARK, '')
+          }
+        } catch (e) { /* 下一轮再试 */ }
+      }
+      let watched
+      let panelObserver
+      const sync = () => {
+        const panel = doc.querySelector(PANEL_SELECTOR)
+        if (!panel) {
+          panelObserver?.disconnect()
+          panelObserver = void 0
+          watched = void 0
+          return
+        }
+        markPanel(panel)
+        if (panel === watched) return
+        injectNavCss()
+        panelObserver?.disconnect()
+        watched = panel
+        panelObserver = new Observer(() => { markPanel(panel) })
+        panelObserver.observe(panel, { childList: true, subtree: true })
+      }
+      sync()
+      const bodyObserver = new Observer(sync)
+      bodyObserver.observe(doc.body, { childList: true })
+      return () => { bodyObserver.disconnect(); panelObserver?.disconnect() }
+    }
+
     return {
       inject: ['slots'],
       apply(ctx) {
@@ -450,6 +521,9 @@ audio[data-bv-audio]{height:34px;max-width:100%}
           { name: 'settings.section', id: 'breeze-voice', order: 30, label: '本地语音' },
           () => h(Panel),
         ))
+
+        const disposeNavIcon = installSectionNavIcon()
+        if (disposeNavIcon) ctx.effect(() => disposeNavIcon, 'dsh-breeze-voice: 设置页导航图标')
       },
     }
   },
