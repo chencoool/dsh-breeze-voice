@@ -5,7 +5,7 @@
 //      （默认 http://127.0.0.1:18099），合成走 /v1/audio/speech（multipart），
 //      音色走 /v1/voices，模型/下载/显存全交给桌面版 UI。
 //   2) 自管模式（local）：插件自己 spawn breeze-server、读 breeze-runtime.json，
-//      合成走 engine/*.mjs（旧行为，兼容 Aurabot 那套安装）。
+//      合成走 engine/*.mjs（用装在本机的 Breeze 引擎，不依赖桌面版）。
 //   默认 mode='auto'：探测到 18099 活着就自动用连接模式，否则退回自管模式。
 // 把音色注册进「语音输出端」注册表：
 //   - 首选 dsh-pet 的 petApi7340.voice.register（dsh-pet 的下拉直接认出）
@@ -13,7 +13,7 @@
 // 只碰输出端（TTS/Voice），不碰任何语音输入识别（STT/Speech）。
 // ============================================================================
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -46,23 +46,32 @@ const CONFIG_FILE = join(HOME, 'config.json')
 const SAMPLES = join(HOME, 'samples')
 const CACHE = join(HOME, 'cache')
 
-// 自管模式下 root 没填时，自动从本机已有的语音插件配置里探测 Breeze 安装目录。
+// 自管模式下 root 没填时，扫描本机各插件数据目录里的配置，探测 Breeze 安装目录。
+// 任何语音插件只要按 { voice: { breeze: { root } } } 记过目录都能被发现；
 // 命中后必须校验 <root>/breeze-runtime.json 存在，避免误认到失效路径。
 function discoverRoot() {
-  const files = [
-    join(homedir(), '.dsh', 'plugins-data', 'aurabot', 'config.json'),
-    join(profileDir(), 'plugins-data', 'aurabot', 'config.json'),
-    join(homedir(), '.dsh', 'profiles', 'desktop', 'plugins-data', 'aurabot', 'config.json'),
+  const bases = [
+    join(homedir(), '.dsh', 'plugins-data'),
+    join(profileDir(), 'plugins-data'),
+    join(homedir(), '.dsh', 'profiles', 'desktop', 'plugins-data'),
   ]
-  for (const f of files) {
-    try {
-      const j = JSON.parse(readFileSync(f, 'utf8'))
-      const r = j && j.voice && j.voice.breeze && j.voice.breeze.root
-      if (typeof r === 'string' && isAbsolute(r) && existsSync(join(r, 'breeze-runtime.json'))) {
-        log('自动发现安装目录（自管模式）：', r, '（来自', f + '）')
-        return r
-      }
-    } catch { /* 这份配置没有 / 读不动，试下一份 */ }
+  const seen = new Set()
+  for (const base of bases) {
+    let entries = []
+    try { entries = readdirSync(base, { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue
+      const f = join(base, ent.name, 'config.json')
+      try {
+        const j = JSON.parse(readFileSync(f, 'utf8'))
+        const r = j && j.voice && j.voice.breeze && j.voice.breeze.root
+        if (typeof r === 'string' && isAbsolute(r) && !seen.has(r) && existsSync(join(r, 'breeze-runtime.json'))) {
+          seen.add(r)
+          log('自动发现安装目录（自管模式）：', r, '（来自', f + '）')
+          return r
+        }
+      } catch { /* 这份配置没有 / 读不动，试下一份 */ }
+    }
   }
   return ''
 }
