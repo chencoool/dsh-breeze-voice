@@ -1,10 +1,10 @@
 // dsh-breeze-voice —— 宿主半端
 // ============================================================================
-// 把 Aurabot 里那套本地 Breeze TTS 2 做成「通用语音输出插件」：
-//   1. 设置页主界面照搬 Aurabot 的 Breeze 选项设计结构（见 client.js）：
+// 把本机 Breeze TTS 2 封装成「通用语音输出插件」：
+//   1. 设置页主界面参考同类语音设置的设计结构（见 client.js）：
 //      音色 / 自动情绪 / 傲娇底色 / 模型判断情绪 / 空闲卸载 / 卸载时长 /
 //      安装目录 / 显存(卸载·加载)。
-//   2. 复用 Aurabot 的 breeze 引擎（engine/*.mjs：service/emotion/loudness），
+//   2. 调用本机 breeze 引擎（engine/*.mjs：service/emotion/loudness），
 //      本机合成，返回 24kHz 单声道 16bit WAV。
 //   3. 把本地音色注册进「语音输出端」注册表：
 //      - 首选 dsh-pet 的 petApi7340.voice.register（dsh-pet 的下拉直接认出）
@@ -45,9 +45,9 @@ const CONFIG_FILE = join(HOME, 'config.json')
 const SAMPLES = join(HOME, 'samples')
 const CACHE = join(HOME, 'cache')
 
-// root 没填时，自动从 Aurabot 的配置里继承 Breeze 安装目录。
-// Aurabot 用的是它自己的 plugins-data 布局，这里把常见位置都试一遍，
-// 命中后必须校验 <root>/breeze-runtime.json 存在，避免误认到失效路径。
+// root 没填时，自动从本机已有的语音插件配置里探测 Breeze 安装目录。
+// 这里把常见配置位置都试一遍，命中后必须校验 <root>/breeze-runtime.json 存在，
+// 避免误认到失效路径。
 function discoverRoot() {
   const files = [
     join(homedir(), '.dsh', 'plugins-data', 'aurabot', 'config.json'),
@@ -92,7 +92,7 @@ function readConfig() {
     else cfg[k] = String(v ?? '')
   }
   if (![1, 3, 5, 10, 15, 30].includes(cfg.unloadIdleMinutes)) cfg.unloadIdleMinutes = 5
-  // 没填过安装目录时，自动继承 Aurabot 的 Breeze 目录（内存生效，不擅自落盘）。
+  // 没填过安装目录时，自动探测本机已有的 Breeze 目录（内存生效，不擅自落盘）。
   if (!cfg.root) cfg.root = discoverRoot()
   return cfg
 }
@@ -138,7 +138,7 @@ function createServiceSafe(runtime) {
   })
 }
 function voices() {
-  // 兜底：模块加载那次没发现到（如 Aurabot 配置当时还没写好），这里再试一次。
+  // 兜底：模块加载那次没探测到（如配置文件当时还没写好），这里再试一次。
   if (!cfg.root) cfg.root = discoverRoot()
   if (!cfg.root) return PRESETS.map((p) => ({ ...p, ready: false }))
   try {

@@ -1,11 +1,11 @@
 {
   "meta": {
     "title": "Local Voice · Breeze TTS 2",
-    "description": "Registers your local Breeze TTS 2 voices to every plugin that can speak, with an Aurabot-style settings panel for voice, emotion and GPU-memory policy."
+    "description": "Makes your local Breeze TTS 2 voices available to other voice plugins, with a settings panel for voice, emotion and GPU-memory policy."
   },
   "nav": "Local Voice",
   "section": {
     "title": "Local Voice · Breeze TTS 2",
-    "subtitle": "Runs on this machine; pick voice and emotions below. Once installed, every voice-consuming plugin can see these voices."
+    "subtitle": "A local speech-output service running on this machine; pick voice and emotion below. Other plugins can opt in (see the integration guide)."
   }
 }

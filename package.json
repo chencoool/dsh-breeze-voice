@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local Breeze TTS 2 as a universal voice-output plugin: a settings panel modeled on Aurabot's Breeze options, registering local voices into any voice-consuming plugin through a shared voice registry.",
+  "description": "Local Breeze TTS 2 wrapped as a universal voice-output service for DeepSeek Harness, with a settings panel and a shared voice API that any voice-consuming plugin can opt into.",
   "icon": "icon.svg",
   "exports": {
     ".": "./index.js",
