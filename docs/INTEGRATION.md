@@ -1,0 +1,166 @@
+# 让其它插件接入本机 Breeze 音色（集成说明）
+
+> 适用对象：想让**自己的语音插件**也能用上本机 Breeze 音色的插件作者 / 有改造能力的用户。
+> 本文只讲「怎么接」，不改动 DSH 核心、也不改动本插件本身。
+
+## 背景：为什么需要手动接
+
+DSH 核心目前**没有统一的语音输出（TTS）服务 seam**——只有语音输入（STT）的服务接口。所以不存在「装一个插件，所有插件的语音下拉就自动出现音色」的机制（这点和大模型 API 不一样，llm 服务有 `registerAdapter / listModels / registerModelDiscovery` 那一套，TTS 没有）。
+
+因此，本插件提供**两个接入点**，其它插件按需择一接入：
+
+| 接入点 | 服务对象 | 适合谁 |
+|---|---|---|
+| A. `petApi7340.voice` 注册表 | dsh-pet 提供的语音注册表 | 下拉本来就从这个注册表读音色的插件（如 dsh-pet 本身），**零改动自动生效** |
+| B. `breezeVoice` 服务 | 本插件 `ctx.provide` 暴露 | 任何愿意主动调几行代码来接的插件 |
+
+## 安装前提
+
+1. 装好本插件（`@local/dsh-breeze-voice`），重启 DSH。
+2. 本机装好 Breeze TTS 2（有 `breeze-runtime.json`、模型、`.breeze` 音色文件）。本插件会**自动从 Aurabot 配置 `voice.breeze.root` 继承安装目录**，也可在设置页「本地语音 → 安装目录」手动填。
+3. 确认音色已就绪：设置页音色下拉里标着「本机」的项就是能直接用的；标「还没建好」的要先设计生成 `.breeze` 文件。
+
+---
+
+## 方式 A：你的插件已经读 dsh-pet 的语音注册表
+
+如果你的插件语音下拉的数据源就是 `petApi7340.voice.list()`，那么**什么都不用改**：
+
+- 本插件启动时会把全部音色以 `breeze/<音色id>` 注册进 dsh-pet 的 `voice` 注册表；
+- 重启后你的下拉会自动出现「本机 Breeze TTS 2」这一组，音色 id 形如 `breeze/dafeiyu_mihuban`、`breeze/aojiao_daxiaojie`；
+- 播放时按 dsh-pet 的 `voice.speak` 正常流程走即可，底层会调到本插件的合成函数。
+
+> 注意：这要求 dsh-pet 处于启用状态。若 dsh-pet 被 `disabled`，注册表不存在，本插件的自动注册会静默跳过。
+
+---
+
+## 方式 B：直接调用 `breezeVoice` 服务
+
+在**宿主半端**（插件的 `index.js`，cordis 插件）通过 `ctx.get` 获取，建议用 `inject` 处理加载顺序（本插件可能比你的插件晚就绪）。
+
+### 服务接口签名
+
+```js
+const bv = ctx.get('breezeVoice', true)   // 第二个参数 true = 软取，没装也不抛错
+if (!bv) return                            // 本插件没装 / 还没就绪
+
+// 1) 音色清单：返回数组，每项 { id, name, description, instruction, seed, ready }
+const voices = bv.listVoices()
+
+// 2) 运行状态：{ root, configured, loaded, lastLoadedAt, lastUsedAt, voice }
+const status = await bv.status()
+
+// 3) 合成语音：speak(text, voiceId, opts?) -> { bytes, voice, emotion }
+//    bytes 是 WAV（24kHz 单声道 16bit）的 Buffer；voiceId 用不带前缀的裸 id
+const { bytes, voice, emotion } = await bv.speak('你好呀', 'dafeiyu_mihuban')
+
+// 4) 音色清单变了（比如用户改了配置）时，刷新注册到 dsh-pet：
+bv.refreshRegistration()
+```
+
+### 最小可用接入示例
+
+```js
+export const name = 'my-voice-plugin'
+export const inject = ['breezeVoice']   // 声明依赖，宿主会等你拿不到时再注入
+
+let dispose = null
+
+export function apply(ctx) {
+  const register = () => {
+    const bv = ctx.get('breezeVoice', true)
+    if (!bv) return
+    dispose?.()
+
+    // 把 breeze 的音色转成你自己下拉需要的格式，注册进你自己的语音注册表
+    const items = bv.listVoices().map(v => ({
+      id: v.id,
+      name: v.name,
+      ready: v.ready,
+    }))
+
+    // ↓↓↓ 换成你自己的注册表 API ↓↓↓
+    myVoiceRegistry.register({
+      id: 'breeze',
+      name: '本机 Breeze TTS 2',
+      voices: items,
+      synthesize: async ({ text, voice }) => {
+        const r = await bv.speak(text, voice)   // 直接借用本插件合成
+        return r.bytes                          // 返回 WAV 字节
+      },
+    })
+  }
+
+  register()
+  ctx.inject(['breezeVoice'], register)   // 本插件晚就绪时补一次
+  ctx.effect(() => () => dispose?.())
+}
+```
+
+---
+
+## 方式 C：把音色注册进你自己的 voice 注册表（仿 dsh-pet 写法）
+
+如果你的插件像 dsh-pet 一样维护自己的 voice 注册表，且它的 `synthesize` 契约和 dsh-pet 一致，可以直接复用本插件 `index.js` 里 `registerToPet()` 的写法：
+
+```js
+const bv = ctx.get('breezeVoice', true)
+if (!bv) return
+
+const def = {
+  id: 'breeze',                       // kebab-case，别和别的 provider 撞
+  name: '本机 Breeze TTS 2',
+  format: 'wav',
+  timeoutMs: 200_000,                 // 本机合成可能几十秒，别用默认 15s
+  voices: bv.listVoices().map(v => ({
+    id: v.id,
+    name: v.name,
+    tag: (v.ready ? '本机' : '未建好') + (v.description ? ' · ' + v.description : ''),
+  })),
+  synthesize: async ({ text, voice }) => (await bv.speak(text, voice)).bytes,
+}
+
+myVoiceRegister(def)                  // 换成你自己的注册函数
+```
+
+要点：
+- `synthesize` 收到的 `voice` 是**裸 id**（不带 `breeze/` 前缀），直接传给 `bv.speak` 即可；
+- `format` 填 `'wav'`，`timeoutMs` 建议 ≥ 200000，否则本机合成慢时会被超时掐断；
+- `bv.listVoices()` 里 `ready === false` 的音色还没生成 `.breeze` 文件，点了会合成失败，建议在下拉里标注出来。
+
+---
+
+## 也可以走纯 HTTP（不写 cordis 插件）
+
+本插件在宿主注册了 `/api/breeze-voice` 前缀路由，如果你的插件（或前端页面）不方便拿服务，可以直接发 HTTP 请求：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/breeze-voice/config` | 配置 + 音色清单 + 状态 |
+| `GET` | `/api/breeze-voice/voices` | 音色清单 |
+| `GET` | `/api/breeze-voice/status` | 加载状态 |
+| `POST` | `/api/breeze-voice/preview` | `{text, voice}` → 直接返回 WAV 字节流（浏览器可直接 `<audio src>`） |
+
+```js
+const r = await fetch('/api/breeze-voice/voices', { credentials: 'same-origin' })
+const { voices } = await r.json()
+```
+
+---
+
+## 常见问题
+
+**Q：装了本插件，我的插件下拉还是没出现音色？**
+A：只有走「方式 A」（读 dsh-pet 注册表）才会自动出现。方式 B/C 需要你的插件主动加几行接入代码。另外确认 dsh-pet 已启用、本插件已重启加载。
+
+**Q：拿到服务时是 `null`？**
+A：加载顺序问题。用 `ctx.inject(['breezeVoice'], fn)` 等它就绪后再注册，别在 `apply` 里假设它一定已经存在。
+
+**Q：合成报「请先填写安装目录」？**
+A：本插件没自动发现到 Breeze 目录。去设置页「本地语音 → 安装目录」手动填 `J:\BreezeTTS2` 这类路径（要含 `breeze-runtime.json`），保存后重试。
+
+**Q：音色标着「还没建好」能用吗？**
+A：不能。那是预设/自定义项还没生成对应的 `.breeze` 文件，需要先在 Breeze 侧设计生成。
+
+**Q：多个 TTS 插件都想注册，ID 撞了怎么办？**
+A：provider id 用 kebab-case 且保证唯一（本插件固定用 `breeze`）。dsh-pet 的注册表遇到重复 id 会直接抛错，注册前先确认没占用。

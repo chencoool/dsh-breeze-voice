@@ -38,6 +38,10 @@
 - `POST /preview` — `{text, voice}` → WAV 字节（面板试听）
 - `POST /unload` / `POST /load` — 手动卸载/加载模型
 
+## 让其它插件也用上这些音色
+
+本插件不会让所有语音插件**自动**出现音色（DSH 核心没有统一 TTS 注册表）。已读 dsh-pet 语音注册表的插件（如 dsh-pet 本身）会自动认出；其它插件需主动接入本插件暴露的 `breezeVoice` 服务——详见 [集成说明](docs/INTEGRATION.md)。
+
 ## 前提
 
 - 本机已装好 Breeze TTS 2（有 `breeze-runtime.json`、模型、音色 `.breeze` 文件）。安装目录会在启动时**自动从 Aurabot 配置继承**（`voice.breeze.root`），也可以在设置页手动改；没自动发现到时手动填一次即可。
