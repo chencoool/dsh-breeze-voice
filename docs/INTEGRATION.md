@@ -143,11 +143,15 @@ export function apply(ctx) {
 | `GET` | `/api/breeze-voice/voices` | 音色清单 |
 | `GET` | `/api/breeze-voice/status` | 加载状态 |
 | `POST` | `/api/breeze-voice/preview` | `{text, voice}` → 直接返回 WAV 字节流（浏览器可直接 `<audio src>`） |
+| `POST` | `/api/breeze-voice/voice/add` | multipart：`ref_audio`(WAV) + `ref_text` + `name` + 可选 `description` → 添加克隆音色到桌面版音色库（需桌面版在跑，连接模式） |
+| `POST` | `/api/breeze-voice/voice/delete` | `{id}` → 删除桌面版音色库里的克隆音色 |
 
 ```js
 const r = await fetch('/api/breeze-voice/voices', { credentials: 'same-origin' })
 const { voices } = await r.json()
 ```
+
+> 添加音色走 `FormData` 原样透传到桌面版 `/v1/voices`，参考音频会被规范化为 24 kHz 单声道 16 bit WAV（最长 30 秒），音色文件由桌面版写进它安装目录的 `voices\` 库——插件自己不另存一份，两边共用同一份音色。
 
 ---
 
@@ -170,3 +174,6 @@ A：「连接方式=自动」即可：桌面版后端开着就走连接模式（
 
 **Q：多个 TTS 插件都想注册，ID 撞了怎么办？**
 A：provider id 用 kebab-case 且保证唯一（本插件固定用 `breeze`）。注册表遇到重复 id 通常会直接抛错，注册前先确认没占用。
+
+**Q：怎么添加自己的音色？音色存在哪里？**
+A：连接模式下，设置页「本地语音 → 音色库 · 添加克隆音色」上传参考音频（≤30 秒）、填逐字稿和名字即可。插件把请求透传给桌面版 `/v1/voices`，音色文件由桌面版存进它安装目录的 `voices\` 库——桌面版和 DSH 共用同一份，不用两头各建一次。添加需要桌面版正在运行；克隆音色可在列表里一键删除（走 `POST /voice/delete`）。自管模式没有这个图形化添加入口（音色来自安装目录的 `custom-presets.json`，`.breeze` 文件要在 Breeze 侧生成）。

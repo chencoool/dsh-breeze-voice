@@ -406,6 +406,52 @@ async function speakConnect(textValue, voiceId, emo, opts = {}) {
   return { bytes, voice: id, emotion: emo ? emo.name : null }
 }
 
+// ---- 音色库管理 ------------------------------------------------------------
+// 「添加音色」本质是桌面版后端的参考音频克隆能力（POST /v1/voices）。插件把
+// 客户端的 multipart 原样转发给桌面版，音色文件由桌面版自己写进它的 voices\ 库——
+// 这样桌面版界面和本插件看到的是同一份音色，换音色两边都认。无论工作模式，
+// 添加/删除音色都需要桌面版后端在线（local 旧布局没有这个服务会明确报错）。
+async function addVoice(req) {
+  const ep = cfg.endpoint || DEFAULT_ENDPOINT
+  const buf = await readBodyBuffer(req)
+  const ct = (req.headers && req.headers['content-type']) || 'multipart/form-data'
+  let res
+  try {
+    res = await fetch(ep + '/v1/voices', {
+      method: 'POST',
+      headers: { 'content-type': ct },
+      body: buf,
+      signal: AbortSignal.timeout(120_000),
+    })
+  } catch (e) {
+    throw new Error('连不上桌面版后端（' + ep + '），请先启动 Breeze TTS 2 桌面版：' + (e && e.message ? e.message : e))
+  }
+  let text = ''
+  try { text = await res.text() } catch { /* 忽略 */ }
+  if (!res.ok) throw new Error('桌面版创建音色失败 HTTP ' + res.status + (text ? '：' + text.slice(0, 200) : ''))
+  try { await voices() } catch { /* 忽略：下次访问会再刷 */ }
+  return text || '{"ok":true}'
+}
+
+async function deleteVoice(id) {
+  const ep = cfg.endpoint || DEFAULT_ENDPOINT
+  if (!id) throw new Error('缺少音色 id')
+  let res
+  try {
+    res = await fetch(ep + '/v1/voices/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (e) {
+    throw new Error('连不上桌面版后端（' + ep + '）：' + (e && e.message ? e.message : e))
+  }
+  let text = ''
+  try { text = await res.text() } catch { /* 忽略 */ }
+  if (!res.ok) throw new Error('桌面版删除音色失败 HTTP ' + res.status + (text ? '：' + text.slice(0, 200) : ''))
+  try { await voices() } catch { /* 忽略 */ }
+  return text || '{"ok":true}'
+}
+
 // ---- 空闲卸载（仅自管模式有意义） ------------------------------------------
 let lastActivity = Date.now()
 let idleTimer = null
@@ -458,6 +504,22 @@ function readBody(req) {
       chunks.push(c)
     })
     req.on('end', () => settle(() => resolveP(Buffer.concat(chunks).toString('utf8'))))
+    req.on('error', (e) => settle(() => reject(e)))
+  })
+}
+// 读二进制请求体（添加音色的 multipart 参考音频用），上限 12MB。
+function readBodyBuffer(req, limit = 12 * 1024 * 1024) {
+  return new Promise((resolveP, reject) => {
+    const chunks = []
+    let size = 0
+    let settled = false
+    const settle = (fn) => { if (settled) return; settled = true; fn() }
+    req.on('data', (c) => {
+      size += c.length
+      if (size > limit) { settle(() => reject(Object.assign(new Error('音频太大（上限 12MB）'), { code: 'body-too-large' }))); req.destroy(); return }
+      chunks.push(c)
+    })
+    req.on('end', () => settle(() => resolveP(Buffer.concat(chunks))))
     req.on('error', (e) => settle(() => reject(e)))
   })
 }
@@ -559,6 +621,28 @@ export function apply(ctx) {
         if (method === 'GET' && path === '/voices') {
           try { return sendJson(res, 200, { ok: true, voices: await voices() }) }
           catch (e) { return sendJson(res, 200, { ok: false, voices: [], message: e.message }) }
+        }
+
+        // POST /voice/add —— 添加音色：multipart 原样转发到桌面版 /v1/voices，
+        // 音色文件由桌面版写进它的 voices\ 库（转发请求头保留 boundary）。
+        if (method === 'POST' && path === '/voice/add') {
+          try {
+            const txt = await addVoice(req)
+            let data = {}
+            try { data = JSON.parse(txt) } catch { data = { message: txt } }
+            return sendJson(res, 200, { ok: true, ...data })
+          } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }) }
+        }
+
+        // POST /voice/delete —— 删除音色：{ id } → 桌面版 DELETE /v1/voices/<id>
+        if (method === 'POST' && path === '/voice/delete') {
+          try {
+            const body = JSON.parse(await readBody(req) || '{}')
+            const txt = await deleteVoice(String(body.id || ''))
+            let data = {}
+            try { data = JSON.parse(txt) } catch { data = { message: txt } }
+            return sendJson(res, 200, { ok: true, ...data })
+          } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }) }
         }
 
         // GET /status —— 连接/加载状态
