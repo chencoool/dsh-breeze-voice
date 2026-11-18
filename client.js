@@ -42,34 +42,41 @@ window.__ModuleLoader__.load({
     // 不在 listTokens 白名单里的 token 一律给回退值，保证明暗主题都能看。
     const CSS = `
 [data-bv-page]{display:flex;flex-direction:column;gap:12px;padding:2px 2px 12px;max-width:720px;
+  font-family:"Microsoft YaHei UI","微软雅黑","PingFang SC","Hiragino Sans GB","Noto Sans SC",system-ui,sans-serif;
   color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}
-[data-bv-h]{font-size:16px;font-weight:500;line-height:24px;margin:0;color:var(--dsw-alias-label-primary)}
+[data-bv-h]{font-size:16px;font-weight:650;line-height:24px;margin:0;color:var(--dsw-alias-label-primary)}
 [data-bv-sub]{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin:-6px 0 0}
 [data-bv-card]{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;
   border:1px solid var(--dsw-alias-border-l2)}
-[data-bv-card__title]{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}
+[data-bv-card__title]{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
 [data-bv-row]{display:flex;align-items:center;gap:12px;min-height:28px}
 [data-bv-msg]{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 [data-bv-label]{font-size:13px;color:var(--dsw-alias-label-primary)}
 [data-bv-hint]{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
 [data-bv-ctl]{flex:none;display:flex;align-items:center;gap:8px}
+/* 按钮/选项文字统一走市场同款黑色系：--dsw-alias-label-primary（浅色主题≈#1f2328）。
+   不用蓝底白字/红字，主次靠底色深浅+字重区分，跟随插件市场的中性风格。 */
 [data-bv-input]{box-sizing:border-box;min-height:28px;padding:4px 10px;border-radius:8px;font:inherit;font-size:13px;
-  color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);
+  color:var(--dsw-alias-label-primary,#1f2328);background:var(--dsw-alias-bg-layer-1);
   border:1px solid var(--dsw-alias-border-l2);outline:none}
-[data-bv-input]:focus{border-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+[data-bv-input]:focus{border-color:var(--dsw-alias-label-secondary,#5c6570)}
 [data-bv-input][data-wide]{flex:1;min-width:220px}
 [data-bv-area]{min-height:56px;resize:vertical;line-height:18px}
-[data-bv-btn]{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);
+[data-bv-btn]{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary,#1f2328);
   border-radius:8px;padding:4px 14px;font:inherit;font-size:12px;line-height:20px;cursor:pointer;white-space:nowrap}
 [data-bv-btn]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}
 [data-bv-btn]:disabled{opacity:.5;cursor:default}
-[data-bv-btn][data-primary]{border-color:var(--dsw-alias-button-info-fill,var(--dsw-alias-brand-primary));
-  background:var(--dsw-alias-button-info-fill,var(--dsw-alias-brand-primary));color:#fff}
-[data-bv-btn][data-danger]{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}
+/* 主按钮跟随市场 installBtn：黑底白字（hover 不变，本就是最深强调态）。 */
+[data-bv-btn][data-primary]{border-color:transparent;
+  background:var(--dsw-alias-button-primary-fill,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff);font-weight:600}
+[data-bv-btn][data-primary]:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff)}
+/* 危险按钮跟随市场 dangerBtn：红字红框，hover 红底白字。 */
+[data-bv-btn][data-danger]{border-color:var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626)}
+[data-bv-btn][data-danger]:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-label-primary-foreground,#fff)}
 [data-bv-btn][data-sm]{padding:2px 10px}
-[data-bv-toggle]{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary)}
+[data-bv-toggle]{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1f2328)}
 [data-bv-toggle] input[type=checkbox]{width:16px;height:16px;margin:0;cursor:pointer;
-  accent-color:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary))}
+  accent-color:var(--dsw-alias-label-primary,#1f2328)}
 [data-bv-status]{font-size:12px;line-height:18px;padding:8px 11px;border-radius:8px;word-break:break-all;
   border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
 [data-bv-dot]{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;
@@ -489,7 +496,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         // —— 接入其它本地语音插件卡片（只检测 + 给手动接入参数，不写别人目录）——
         h('div', { 'data-bv-card': '' },
           h('div', { 'data-bv-card__title': '' }, '接入其它本地语音插件'),
-          h('div', { 'data-bv-hint': '' }, '检测本机已装的本地语音插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。'),
+          h('div', { 'data-bv-hint': '' }, '检测 DSH 已装的、带本地语音服务接口的插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。'),
           integrations.length ? h('div', { 'data-bv-vlist': '' },
             integrations.map((p) => h('div', { 'data-bv-vitem': '', key: p.id },
               h('span', { title: p.detail }, p.name + ' · ' + p.detail),

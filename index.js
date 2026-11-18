@@ -916,7 +916,7 @@ export function apply(ctx) {
             method: 'POST',
             headers: 'Content-Type: application/json',
             body: '{"text":"{text}"}',
-            note: '请求体故意不带 voice：念的时候用「本地语音」页当前选中的音色，换音色只改本页。DSH 重启端口会变，变了要更新这里的端口。',
+            note: '请求体故意不带 voice：念的时候用「本地语音」页当前选中的音色，换音色只改本页。DSH 重启后端口会变：点「复制给 agent」按钮，把指令粘到 agent 对话窗口，让 agent 读那个插件源码现场适配，让插件 HTTP 端口获取自动同步，免去重复适配。',
             // 一键复制给 agent 的指令：主张动态地址填好，让 agent 现场适配其它插件的配置。
             agentPrompt: [
               '请帮我让【目标插件名】里填的「Breeze 语音 HTTP 接口地址」在 DSH 每次重启、web 端口变化后自动同步，我不用手动改。',
