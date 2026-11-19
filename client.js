@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
 [data-bv-card]{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;
   border:1px solid var(--dsw-alias-border-l2)}
 [data-bv-card__title]{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
+[data-bv-head]{display:flex;align-items:center;justify-content:space-between;gap:12px}
 [data-bv-row]{display:flex;align-items:center;gap:12px;min-height:28px}
 [data-bv-msg]{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 [data-bv-label]{font-size:13px;color:var(--dsw-alias-label-primary)}
@@ -495,8 +496,17 @@ audio[data-bv-audio]{height:34px;max-width:100%}
 
         // —— 接入其它本地语音插件卡片（只检测 + 给手动接入参数，不写别人目录）——
         h('div', { 'data-bv-card': '' },
-          h('div', { 'data-bv-card__title': '' }, '接入其它本地语音插件'),
-          h('div', { 'data-bv-hint': '' }, '检测 DSH 已装的、带本地语音服务接口的插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。'),
+          h('div', { 'data-bv-head': '' },
+            h('div', { 'data-bv-card__title': '' }, '接入其它本地语音插件'),
+            httpGuide && httpGuide.agentDetectPrompt ? h('button', {
+              'data-bv-btn': '', 'data-sm': '', type: 'button',
+              onClick: async () => {
+                try { await navigator.clipboard.writeText(httpGuide.agentDetectPrompt); toast('检测指令已复制，粘贴到 agent 对话窗口，让它判断目标插件能不能接。', false) }
+                catch { toast('复制失败，完整说明见插件目录 docs/AGENT-VOICE-INTEGRATION.md。', true) }
+              },
+            }, '复制给 agent（检测能不能接）') : null,
+          ),
+          h('div', { 'data-bv-hint': '' }, '检测 DSH 已装的、带本地语音服务接口的插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。拿不准某插件能不能接？点右上「复制给 agent（检测能不能接）」，把指令粘到 agent 对话窗口，它会读那个插件源码判断并给出接法——只检测、出方案，接不接全由你拍板。'),
           integrations.length ? h('div', { 'data-bv-vlist': '' },
             integrations.map((p) => h('div', { 'data-bv-vitem': '', key: p.id },
               h('span', { title: p.detail }, p.name + ' · ' + p.detail),

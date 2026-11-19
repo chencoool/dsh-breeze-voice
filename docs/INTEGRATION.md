@@ -114,7 +114,7 @@ const status = await bv.status()
 // 3) 合成语音：speak(text, voiceId, opts?) -> { bytes, voice, emotion }
 //    bytes 是 WAV（24kHz 单声道 16bit）的 Buffer；voiceId 用不带前缀的裸 id；
 //    opts 可传 { signal } 便于取消。两种模式对外接口一致，内部自动分流。
-const { bytes, voice, emotion } = await bv.speak('你好呀', 'dafeiyu_mihuban', { signal })
+const { bytes, voice, emotion } = await bv.speak('你好呀', 'cloned_voice_id', { signal }) // cloned_voice_id 换成你自己的克隆音色 id
 
 // 4) 音色清单变了（比如用户改了配置）时，刷新注册：
 bv.refreshRegistration()

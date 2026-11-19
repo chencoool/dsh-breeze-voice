@@ -27,7 +27,7 @@
 - **连接模式合成**：用 `multipart/form-data` 把文字/音色发给桌面版（字段 `text` / `instruction` / `voice_id`），把返回的 24 kHz 单声道 16 bit 裸 PCM 封成 WAV；不联网、不调用在线 TTS。
 - **音色来源**：连接模式下，音色来自桌面版的克隆音色库（`voices\`，靠 `voice_id` 驱动）+ 内置描述式预设（靠 `instruction` 驱动）；自管模式下音色来自安装目录的 `custom-presets.json`。
 - **添加音色（连接模式）**：在设置页「音色库 · 添加克隆音色」里上传一段参考音频（自动统一成 24 kHz 单声道 16 bit WAV，最长 30 秒）+ 填逐字稿和名字，插件把它透传到桌面版的 `/v1/voices`，**音色文件直接存进桌面版的 `voices\` 库**。这样桌面版和 DSH 两边看到的是同一份音色，换音色不用两头折腾；克隆音色还能在列表里一键删除。
-- **情绪语气**：`toneMode` 三档——`off` 不加情绪；`keyword`（默认）按文字关键词挑语气，0 token、离线可用；`model` 先读聊天插件（Aurabot）落盘的心情值 `mood.json`、再用 DSH 当前默认模型把「这句该怎么念」写成一句自然语言提示（约百来 token，同一句+同心情+同音色缓存 10 分钟，模型出错或没配聊天插件自动退回关键词）。音色身份始终排最前；**人设/性格不在这里**——那由聊天插件决定，本插件只管情绪化的念法。28 个纯情绪档 + 撒娇/戏谑/温柔 3 个社交语气档，不含"傲娇"档（那属于人设）。
+- **情绪语气**：`toneMode` 三档——`off` 不加情绪；`keyword`（默认）按文字关键词挑语气，0 token、离线可用；`model` 先读聊天插件（Aurabot）落盘的心情值 `mood.json`、再用 DSH 当前默认模型把「这句该怎么念」写成一句自然语言提示（约百来 token，同一句+同心情+同音色缓存 10 分钟，模型出错或没配聊天插件自动退回关键词）。音色身份始终排最前；**人设/性格不在这里**——那由聊天插件决定，本插件只管情绪化的念法。28 个纯情绪档 + 撒娇/戏谑/温柔 3 个社交语气档。
 - **通用注册**：把音色以 `breeze/音色id` 注册进 dsh-pet 的语音注册表（仅当 dsh-pet 启用时），并以 `breezeVoice` 服务暴露 `listVoices / status / speak / refreshRegistration` 给任何愿意接入的插件。
 - **接入其它本地语音插件**：设置页「接入其它本地语音插件」卡片会检测本机装了哪些**本地**语音插件。dsh-pet 的私有接口 `petApi7340.voice` 已收录、自动接好（DSH 核心层并没有通用 TTS 标准接口，这是 dsh-pet 自己的服务）；其它插件（如 Aurabot）本插件**绝不往它目录里塞脚本、不绕开它原来的音色/情绪设置**——只在卡片里给出「其他 HTTP 接口」的手动接入参数（地址/方式/请求头/请求体），你自己去那个插件面板填一次。DSH 重启后 web 端口会变：**只要你已经用「其他 HTTP 接口」接过本插件**，本插件会在启动和打开设置页时走它的官方保存接口，把地址里的端口自动更新成当前端口（只改端口，音色/情绪/请求方式/请求体一律不动；没接过本插件时一个字都不写）。音色/情绪/连接方式仍全在本插件设置页管；本插件只做本地语音，云端 TTS 不在范围。
 
@@ -101,6 +101,7 @@ dsh plugin --profile desktop add github:chencoool/dsh-breeze-voice
 |---|---|
 | **Breeze TTS 2 桌面版（推荐，安装包从这里下）** | https://github.com/dkvkvk/breeze-tts-2-desktop |
 | 桌面版安装包（Releases 页的 `BreezeTTS2-Setup-*.exe`，约 131 MB） | https://github.com/dkvkvk/breeze-tts-2-desktop/releases |
+| 官方音色库（BreezeBlue，可挑现成音色） | https://breezeblue.ai/zh/app/voice-library |
 | 官方 PyTorch 实现（源码，非安装包，需 Linux + Python + CUDA） | https://github.com/breezeblue-ai/breeze-tts |
 | 上游后端项目（HoppouAI，非官方 C++ 实现） | https://github.com/HoppouAI/Breeze-TTS-2.cpp |
 | 原模型（BreezeBlue） | https://huggingface.co/BreezeBlue/Breeze-TTS-2 |

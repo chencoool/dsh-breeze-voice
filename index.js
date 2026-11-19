@@ -498,6 +498,10 @@ async function emotionFor(textValue, opts = {}) {
 }
 
 // ---- 合成 -----------------------------------------------------------------
+// 连接模式的合成队列：桌面版后端同一时刻适合只跑一个合成任务。先触发的先合成，
+// 后触发的排队，前一个完成（成功或失败）再接续下一个。行为与自管模式
+// engine/service.mjs 的 queue promise 链一致；两种模式互斥、各用各的队列，互不影响。
+let connectQueue = Promise.resolve()
 async function speak(text, voiceId, opts = {}) {
   const m = await activeMode()
   const textValue = validateText(text)
@@ -544,16 +548,25 @@ async function speakConnect(textValue, voiceId, emo, opts = {}) {
     if (instr) form.append('instruction', instr)
   }
 
-  const signal = opts.signal || AbortSignal.timeout(200_000)
-  const res = await fetch(ep + '/v1/audio/speech', { method: 'POST', body: form, signal })
-  if (!res.ok) {
-    let t = ''
-    try { t = await res.text() } catch { /* 忽略 */ }
-    throw new Error('桌面版合成失败 HTTP ' + res.status + (t ? '：' + t.slice(0, 200) : ''))
-  }
-  const pcm = Buffer.from(await res.arrayBuffer())
-  const bytes = wavBuffer(pcm)   // 24kHz/mono/16bit 裸 PCM → WAV（两种模式同规格）
-  return { bytes, voice: id, emotion: emo ? emo.name : null }
+  // 挂到连接模式队列：先触发的先合成，后面的在链上排队，前一个完成/失败再接续下一个。
+  // 超时计时从排到队、真正开始合成时才启动——排队等待不消耗 200 秒预算。
+  // 若调用方自带 signal（如取消），排队阶段也监听它，取消后轮到自己时立即放弃。
+  const job = connectQueue.then(async () => {
+    if (opts.signal && opts.signal.aborted) throw new Error('合成已取消。')
+    const signal = opts.signal || AbortSignal.timeout(200_000)
+    const res = await fetch(ep + '/v1/audio/speech', { method: 'POST', body: form, signal })
+    if (!res.ok) {
+      let t = ''
+      try { t = await res.text() } catch { /* 忽略 */ }
+      throw new Error('桌面版合成失败 HTTP ' + res.status + (t ? '：' + t.slice(0, 200) : ''))
+    }
+    const pcm = Buffer.from(await res.arrayBuffer())
+    const bytes = wavBuffer(pcm)   // 24kHz/mono/16bit 裸 PCM → WAV（两种模式同规格）
+    return { bytes, voice: id, emotion: emo ? emo.name : null }
+  })
+  // 无论成功失败都让队列继续，前一个失败不影响后一个（与自管模式 queue.catch 一致）。
+  connectQueue = job.catch(() => {})
+  return job
 }
 
 // ---- 音色库管理 ------------------------------------------------------------
@@ -930,6 +943,33 @@ export function apply(ctx) {
               '第三步（验证）：①已接本插件+端口变了→只更新端口，其它字段逐一比对不变；②没用 HTTP 引擎→跳过不写；③地址不指向本插件→跳过不写。把三种结果贴给我。',
               '',
               '完整背景与验收清单见本插件 docs/AGENT-PORT-SYNC.md。不要改 dsh-breeze-voice 本身，也不要动任何插件安装目录的源码。',
+            ].join('\n'),
+            // 一键复制给 agent 的「判断目标插件能不能接本地语音」检测指令：只检测 + 出方案，接不接由用户拍板。
+            agentDetectPrompt: [
+              '请帮我判断插件【目标插件名】能不能用上我本机的 Breeze 语音音色，并按决策树给我结论和接法。',
+              '',
+              '最重要的前提：你只负责「检测 + 出方案」，接不接、走哪条路，全部由我（用户）拍板。我没点头之前，不要写任何文件、不要改任何配置。',
+              '',
+              '背景（务必先理解）：这是 DeepSeek Harness（DSH），插件在 <profile>/node_modules/，数据在 ~/.dsh/plugins-data/。本地语音插件 dsh-breeze-voice 只做本地语音输出端（TTS），开放了一个服务供任何插件主动接：',
+              '  const bv = ctx.get(\'breezeVoice\', true)',
+              '  bv.listVoices()                                        // 同步：音色数组 [{id,name,description,ready,kind,refId?}]',
+              '  await bv.status()',
+              '  const {bytes} = await bv.speak(text, voiceId, {signal}) // 合成，bytes 是 WAV Buffer',
+              '  bv.refreshRegistration()',
+              '它也有 HTTP 接口 POST ' + previewUrl + '，请求体 {"text":"要念的话"}，返回带 RIFF 头的 WAV，无需认证，故意不带 voice。DSH 核心没有统一 TTS 注册机制，别指望装了就自动出现在所有插件里。本插件不会自动接别的插件（dsh-pet 是唯一例外）。',
+              '',
+              '第一步（只调查、先别改文件）：读目标插件源码和数据目录，回答：①它有没有开放的语音注册服务接口（类似 petApi7340 的 voice.register / 音色注册表 / registerVoiceProvider）？②有没有能让外部注册音色和合成函数的入口（某个 Map/注册表或 register 方法）？③有没有内置的「其他 HTTP 接口」语音引擎（能填 地址/请求方式/请求头/请求体）？④有没有现成的接第三方 TTS 示例/文档，把字段名和代码片段贴出来。',
+              '',
+              '第二步（按决策树从上到下对号入座给结论）：',
+              '【路径1｜有开放注册接口】→ 说"能接"，给针对它实际 API 的接法（不要只给模板）：用 ctx.get(\'breezeVoice\', true) 拿服务、ctx.inject([\'breezeVoice\'], fn) 处理加载顺序；把 bv.listVoices() 转成它注册表要的格式调 register；synthesize 回调里写 (await bv.speak(text, voice, {signal})).bytes；音色 id 用裸 id、format 填 wav、timeoutMs 给足。然后问我要不要按这个接，我点头再动手，改前先备份。',
+              '【路径2｜没有注册接口但有「其他 HTTP 接口」】→ 说"可以用 HTTP 接，不用等作者更新"，给四项参数：接口地址 ' + previewUrl + '（端口用当前 DSH_WEB_URL）、请求方式 POST、请求头 Content-Type: application/json、请求体 {"text":"{text}"}（{text} 由它替换成要念的话）。强调三点：请求体故意不带 voice（音色由本插件设置页决定）；本插件不写它任何文件；DSH 重启后端口会变，要自动同步另用一份「端口同步」说明。然后问我要不要帮我把参数填进去，我点头再做。',
+              '【路径3｜两条都没有】→ 明说"这个插件目前没有对外的语音接口，也不能填 HTTP 地址，接不了"。不要硬改它源码、不要往它数据目录塞脚本（那会绕开它原来的音色/情绪设置）、也别动 DSH 核心。给一句建设性建议：把本插件的 bv 服务签名发给该插件作者，请对方加几行适配。',
+              '',
+              '第三步：把结论贴给我，由我拍板走哪条路。我没同意前，一个字都别写。',
+              '',
+              '全程护栏：只碰「语音」相关的接口和配置，其它一律不看不改；接不接由我决定，你只负责检测 + 出方案；不要反过来改 dsh-breeze-voice 本身；改任何配置前先备份；不改任何插件安装目录源码。',
+              '',
+              '完整背景、决策树与验收清单见本插件 docs/AGENT-VOICE-INTEGRATION.md。',
             ].join('\n'),
           }
           // 端口自动同步：打开本页就把当前端口写回 aurabot（仅当用户已接本插件时）。
