@@ -551,7 +551,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             )),
           ) : h('div', { 'data-bv-hint': '' }, '没检测到其它本地语音插件。'),
           httpGuide ? h('div', { 'data-bv-manual': '' },
-            h('div', { 'data-bv-card__title': '' }, '手动接入参数（在其它插件的「其他 HTTP 接口」里填）'),
+            h('div', { 'data-bv-card__title': '' }, '手动接入参数（在其它插件的「HTTP 接口」里填）'),
             h('div', { 'data-bv-field': '' },
               h('div', { 'data-bv-flabel': '' }, '接口地址'),
               h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.url, onFocus: (e) => e.target.select() }),
@@ -583,7 +583,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
                   try { await navigator.clipboard.writeText(httpGuide.agentPrompt); toast('给 agent 的指令已复制，粘贴到 agent 对话窗口即可。', false) }
                   catch { toast('复制失败，完整说明见插件目录 docs/AGENT-PORT-SYNC.md。', true) }
                 },
-              }, '复制给 agent（适配其它插件端口同步设置）') : null,
+              }, '复制给 agent（适配其它插件端口的同步设置）') : null,
             ),
             h('div', { 'data-bv-hint': '' }, httpGuide.note),
             portSync ? h('div', {
