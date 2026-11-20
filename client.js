@@ -45,7 +45,7 @@ window.__ModuleLoader__.load({
   font-family:"Microsoft YaHei UI","微软雅黑","PingFang SC","Hiragino Sans GB","Noto Sans SC",system-ui,sans-serif;
   color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}
 [data-bv-h]{font-size:16px;font-weight:650;line-height:24px;margin:0;color:var(--dsw-alias-label-primary)}
-[data-bv-sub]{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);margin:-6px 0 0}
+[data-bv-sub]{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);margin:-6px 0 0}
 [data-bv-card]{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;
   border:1px solid var(--dsw-alias-border-l2)}
 [data-bv-card__title]{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
@@ -53,7 +53,7 @@ window.__ModuleLoader__.load({
 [data-bv-row]{display:flex;align-items:center;gap:12px;min-height:28px}
 [data-bv-msg]{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 [data-bv-label]{font-size:13px;color:var(--dsw-alias-label-primary)}
-[data-bv-hint]{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+[data-bv-hint]{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
 [data-bv-ctl]{flex:none;display:flex;align-items:center;gap:8px}
 /* 按钮/选项文字统一走市场同款黑色系：--dsw-alias-label-primary（浅色主题≈#1f2328）。
    不用蓝底白字/红字，主次靠底色深浅+字重区分，跟随插件市场的中性风格。 */
@@ -75,21 +75,23 @@ window.__ModuleLoader__.load({
 [data-bv-btn][data-danger]{border-color:var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626)}
 [data-bv-btn][data-danger]:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-label-primary-foreground,#fff)}
 [data-bv-btn][data-sm]{padding:2px 10px}
+/* 复制类小按钮：浅灰底，参照原生「选择文件」按钮的灰度。 */
+[data-bv-btn][data-gray]{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14))}
 [data-bv-toggle]{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1f2328)}
 [data-bv-toggle] input[type=checkbox]{width:16px;height:16px;margin:0;cursor:pointer;
   accent-color:var(--dsw-alias-label-primary,#1f2328)}
-[data-bv-status]{font-size:12px;line-height:18px;padding:8px 11px;border-radius:8px;word-break:break-all;
+[data-bv-status]{font-size:11px;line-height:16px;padding:8px 11px;border-radius:8px;word-break:break-all;
   border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
 [data-bv-dot]{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;
   background:var(--dsw-alias-state-idle-primary)}
 [data-bv-dot][data-on]{background:var(--dsw-alias-state-success-primary)}
-[data-bv-toast]{font-size:12px;line-height:18px;min-height:18px;color:var(--dsw-alias-label-secondary)}
+[data-bv-toast]{font-size:11px;line-height:16px;min-height:16px;color:var(--dsw-alias-label-secondary)}
 [data-bv-toast][data-err]{color:var(--dsw-alias-state-error-primary)}
 [data-bv-vlist]{display:flex;flex-direction:column;gap:6px}
 [data-bv-vitem]{display:flex;align-items:center;gap:8px;padding:5px 9px;border-radius:8px;
   border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
 [data-bv-vitem] span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-[data-bv-file]{font-size:12px;max-width:340px;color:var(--dsw-alias-label-secondary)}
+[data-bv-file]{font-size:11px;max-width:340px;color:var(--dsw-alias-label-secondary)}
 select[data-bv-input]{color-scheme:light dark}
 select[data-bv-input] option,select[data-bv-input] optgroup{
   background-color:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
@@ -179,6 +181,10 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       return { url, busy, play, audioRef }
     }
 
+    // 添加音色表单的缓存：即使设置页 section 被宿主重挂，填到一半的音频/文字也能恢复，
+    // 免得被中途刷新清空（配合下面"音色下拉只在添加音色后刷新"的规定）。
+    const addFormCache = { file: null, name: '', refText: '', desc: '' }
+
     function Panel() {
       const [draft, setDraft] = useState(DEFAULTS)
       const [voices, setVoices] = useState([])
@@ -193,13 +199,27 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       const [integrations, setIntegrations] = useState([])
       const [httpGuide, setHttpGuide] = useState(null)
       const [portSync, setPortSync] = useState(null)   // 端口自动同步结果
-      // 添加音色表单
-      const [addFile, setAddFile] = useState(null)
-      const [addName, setAddName] = useState('')
-      const [addRefText, setAddRefText] = useState('')
-      const [addDesc, setAddDesc] = useState('')
+      // 添加音色表单：初值取缓存，防止重挂后清空
+      const [addFile, setAddFileState] = useState(addFormCache.file)
+      const [addName, setAddNameState] = useState(addFormCache.name)
+      const [addRefText, setAddRefTextState] = useState(addFormCache.refText)
+      const [addDesc, setAddDescState] = useState(addFormCache.desc)
       const [adding, setAdding] = useState(false)
       const fileRef = useRef(null)
+      // 写入时同步进缓存；file input 的 DOM value 无法恢复，重挂后用 ref 回填
+      const setAddFile = (f) => { addFormCache.file = f; setAddFileState(f) }
+      const setAddName = (v) => { addFormCache.name = v; setAddNameState(v) }
+      const setAddRefText = (v) => { addFormCache.refText = v; setAddRefTextState(v) }
+      const setAddDesc = (v) => { addFormCache.desc = v; setAddDescState(v) }
+      useEffect(() => {
+        if (addFormCache.file && fileRef.current) {
+          try {
+            const dt = new DataTransfer()
+            dt.items.add(addFormCache.file)
+            fileRef.current.files = dt.files
+          } catch { /* 浏览器不允许时忽略 */ }
+        }
+      }, [])
 
       const mounted = useRef(true)
       useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -209,12 +229,21 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       }, [])
       const preview = usePreview(toast)
 
+      // 音色下拉单独加载：按用户规定，只有「初次挂载」和「添加音色成功后」才刷新
+      // 音色选项；其它任何刷新（配置保存、删除、链路配置、定时/自动）都不碰音色选项。
+      const loadVoices = useCallback(async () => {
+        try {
+          const r = await jget('/voices')
+          if (mounted.current && r && r.ok) setVoices(Array.isArray(r.voices) ? r.voices : [])
+        } catch { /* 音色加载失败不影响面板其它部分 */ }
+      }, [])
+
       const reload = useCallback(async () => {
         try {
           const r = await jget('/config')
           if (!mounted.current) return
           setDraft({ ...DEFAULTS, ...(r.config || {}) })
-          setVoices(Array.isArray(r.voices) ? r.voices : [])
+          // 音色不在这里刷：音色选项只由 loadVoices() 管
           setStat(r.status || {})
         } catch (e) {
           toast('读取配置失败：' + (e && e.message ? e.message : e), true)
@@ -235,7 +264,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         } catch { /* 检测失败不影响面板 */ }
       }, [toast])
 
-      useEffect(() => { reload() }, [reload])
+      useEffect(() => { reload(); loadVoices() }, [reload, loadVoices])
 
       const saveTimer = useRef(null)
       const save = useCallback((next) => {
@@ -246,8 +275,9 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             const r = await jpost('/config', next)
             if (!mounted.current) return
             if (r && r.ok) {
-              const v = await jget('/config')
-              if (mounted.current) { setVoices(Array.isArray(v.voices) ? v.voices : []); setStat(v.status || {}) }
+              // 按用户规定：配置保存后只更新状态，不刷新音色下拉（音色只由 loadVoices 管）
+              const s = await jget('/status')
+              if (mounted.current && s) setStat(s)
             }
             toast('设置已保存。', false)
           } catch (e) { toast('保存失败：' + (e && e.message ? e.message : e), true) }
@@ -269,7 +299,8 @@ audio[data-bv-audio]{height:34px;max-width:100%}
 
       const doAddVoice = async () => {
         if (!addFile) { toast('请先选一段参考音频。', true); return }
-        if (!addName.trim()) { toast('请填音色名称。', true); return }
+        if (!addName.trim()) { toast('请填音色 ID 名称。', true); return }
+        if (!/^[a-z0-9_-]{1,64}$/.test(addName.trim())) { toast('音色 ID 只能用小写英文字母、数字、横杠 -、下划线 _（不支持中文），请改到「音色名称和说明」里填中文名。', true); return }
         if (!addRefText.trim()) { toast('请填参考音频的逐字稿。', true); return }
         setAdding(true)
         toast('正在处理音频并添加到桌面版音色库…')
@@ -289,7 +320,8 @@ audio[data-bv-audio]{height:34px;max-width:100%}
           toast('音色已添加进桌面版音色库，可在下拉里选了。', false)
           setAddFile(null); setAddName(''); setAddRefText(''); setAddDesc('')
           if (fileRef.current) fileRef.current.value = ''
-          await reload()
+          // 用户规定：只有「添加音色」按钮成功后才刷新同步音色下拉
+          await loadVoices()
         } catch (e) { toast('添加音色失败：' + (e && e.message ? e.message : e), true) }
         finally { setAdding(false) }
       }
@@ -324,7 +356,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
       const voiceOptions = voices.length
         ? voices.map((v) => ({
           value: v.id,
-          label: v.name + (v.kind === 'reference' ? '（桌面版）' : (v.ready === false ? '（还没建好）' : '')) + (v.description ? ' · ' + v.description : ''),
+          label: v.name + (v.ready === false ? '（还没建好）' : '') + (v.description ? ' · ' + v.description : ''),
         }))
         : [{ value: draft.voice || '', label: voices.length ? '正在读音色…' : '（先连桌面版或填安装目录）' }]
 
@@ -395,17 +427,20 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             }),
           ) : null,
 
-          h(Row, { key: 'voice', label: '音色', hint: '选一个音色；标「还没建好」的要先设计生成 .breeze 文件，标「桌面版」的是克隆音色。' },
-            h('select', {
-              'data-bv-input': '', value: draft.voice, disabled: loading,
-              onChange: (e) => set('voice', e.target.value),
-              style: { width: 300 },
-            }, voiceOptions.map((o) => h('option', { key: o.value, value: o.value }, o.label))),
-            h('button', {
-              'data-bv-btn': '', 'data-primary': '', type: 'button',
-              disabled: preview.busy || !draft.voice,
-              onClick: () => preview.play(draft.voice),
-            }, preview.busy ? '合成中…' : '▶ 试听'),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+            h(Row, { key: 'voice', label: '我的音色', hint: '桌面模式和自管模式认定同一个音色ID能直接选用，可关闭桌面版。' },
+              h('select', {
+                'data-bv-input': '', value: draft.voice, disabled: loading,
+                onChange: (e) => set('voice', e.target.value),
+                style: { width: 300 },
+              }, voiceOptions.map((o) => h('option', { key: o.value, value: o.value }, o.label))),
+              h('button', {
+                'data-bv-btn': '', 'data-primary': '', type: 'button',
+                disabled: preview.busy || !draft.voice,
+                onClick: () => preview.play(draft.voice),
+              }, preview.busy ? '合成中…' : '▶ 试听'),
+            ),
+            preview.url ? h('audio', { 'data-bv-audio': '', controls: true, ref: preview.audioRef, src: preview.url, style: { alignSelf: 'flex-end' } }) : null,
           ),
 
           h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气（0 token，默认）；模型润色：读聊天插件的心情值，让模型把这句该怎么念写成一句提示（约百来 token，结果缓存 10 分钟）。人设/性格由聊天插件决定，这里只管情绪化的念法。' },
@@ -443,7 +478,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         // —— 音色库卡片（添加 / 删除克隆音色，存进桌面版音色库）——
         h('div', { 'data-bv-card': '' },
           h('div', { 'data-bv-card__title': '' }, '音色库 · 添加克隆音色'),
-          h('div', { 'data-bv-hint': '' }, '上传一段 30 秒内的清晰人声 + 逐字稿，桌面版会把它做成克隆音色存进它自己的音色库，添加后在我的音色下拉里选「（桌面版）」那项即可。需要 Breeze TTS 2 桌面版正在运行。'),
+          h('div', { 'data-bv-hint': '' }, '上传一段 30 秒内的清晰人声 + 逐字稿，提交后由 Breeze TTS 2 桌面版生成克隆音色（需桌面版正在运行）。生成后会自动同步到「我的音色」下拉，桌面模式和自管模式认定同一个音色ID能直接选用，可关闭桌面版。'),
 
           h(Row, { key: 'file', label: '参考音频', hint: '选一段干净的人声，越清晰越好；自动转成 24kHz 单声道 WAV。' },
             h('input', {
@@ -452,23 +487,25 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             }),
           ),
           h(Row, { key: 'refText', label: '逐字稿', hint: '参考音频里说的原话，必须和音频一致。' },
-            h('input', {
-              'data-bv-input': '', 'data-wide': '', type: 'text',
+            h('textarea', {
+              'data-bv-input': '', 'data-wide': '', rows: 2,
+              style: { resize: 'vertical', lineHeight: '18px' },
               value: addRefText, placeholder: '例如：你好，我是大肥鱼，今天天气不错。',
               onChange: (e) => setAddRefText(e.target.value),
             }),
           ),
-          h(Row, { key: 'addName', label: '音色名称', hint: '保存后在下拉里显示的名字。' },
+          h(Row, { key: 'addName', label: '音色ID名称', hint: '音色文件名 / ID：只能用小写英文字母、数字、横杠 -、下划线 _，最多 64 位，不支持中文。中文名请填到下面的「音色名称和说明」。' },
             h('input', {
               'data-bv-input': '', 'data-wide': '', type: 'text',
-              value: addName, placeholder: '例如：大肥鱼·温柔版',
+              value: addName, placeholder: '例如：dafeiyu_wenrou',
               onChange: (e) => setAddName(e.target.value),
             }),
           ),
-          h(Row, { key: 'addDesc', label: '描述（可选）', hint: '给这个音色写一句说明，方便区分。' },
-            h('input', {
-              'data-bv-input': '', 'data-wide': '', type: 'text',
-              value: addDesc, placeholder: '例如：温柔清亮的女声',
+          h(Row, { key: 'addDesc', label: '音色名称和说明（可选）', hint: '写音色的中文名称和说明，会显示在音色下拉选项里（格式：中文名称，音色特点）。' },
+            h('textarea', {
+              'data-bv-input': '', 'data-wide': '', rows: 2,
+              style: { resize: 'vertical', lineHeight: '18px' },
+              value: addDesc, placeholder: '例如：温柔版大肥鱼，温柔清亮的女声',
               onChange: (e) => setAddDesc(e.target.value),
             }),
           ),
@@ -499,7 +536,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
           h('div', { 'data-bv-head': '' },
             h('div', { 'data-bv-card__title': '' }, '接入其它本地语音插件'),
             httpGuide && httpGuide.agentDetectPrompt ? h('button', {
-              'data-bv-btn': '', 'data-sm': '', type: 'button',
+              'data-bv-btn': '', 'data-sm': '', 'data-gray': '', type: 'button',
               onClick: async () => {
                 try { await navigator.clipboard.writeText(httpGuide.agentDetectPrompt); toast('检测指令已复制，粘贴到 agent 对话窗口，让它判断目标插件能不能接。', false) }
                 catch { toast('复制失败，完整说明见插件目录 docs/AGENT-VOICE-INTEGRATION.md。', true) }
@@ -531,21 +568,23 @@ audio[data-bv-audio]{height:34px;max-width:100%}
               h('div', { 'data-bv-flabel': '' }, '请求体'),
               h('input', { 'data-bv-inp': '', readOnly: true, value: httpGuide.body, onFocus: (e) => e.target.select() }),
             ),
-            h('button', {
-              'data-bv-btn': '', 'data-sm': '', type: 'button',
-              onClick: async () => {
-                const text = [httpGuide.url, httpGuide.method, httpGuide.headers, httpGuide.body].join('\n')
-                try { await navigator.clipboard.writeText(text); toast('参数已复制。', false) }
-                catch { toast('复制失败，请手动选中上面的输入框复制。', true) }
-              },
-            }, '复制全部参数'),
-            httpGuide.agentPrompt ? h('button', {
-              'data-bv-btn': '', 'data-sm': '', type: 'button',
-              onClick: async () => {
-                try { await navigator.clipboard.writeText(httpGuide.agentPrompt); toast('给 agent 的指令已复制，粘贴到 agent 对话窗口即可。', false) }
-                catch { toast('复制失败，完整说明见插件目录 docs/AGENT-PORT-SYNC.md。', true) }
-              },
-            }, '复制给 agent（自动适配其它插件）') : null,
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+              h('button', {
+                'data-bv-btn': '', 'data-sm': '', 'data-gray': '', type: 'button',
+                onClick: async () => {
+                  const text = [httpGuide.url, httpGuide.method, httpGuide.headers, httpGuide.body].join('\n')
+                  try { await navigator.clipboard.writeText(text); toast('参数已复制。', false) }
+                  catch { toast('复制失败，请手动选中上面的输入框复制。', true) }
+                },
+              }, '复制全部参数'),
+              httpGuide.agentPrompt ? h('button', {
+                'data-bv-btn': '', 'data-sm': '', 'data-gray': '', type: 'button', style: { marginLeft: 'auto' },
+                onClick: async () => {
+                  try { await navigator.clipboard.writeText(httpGuide.agentPrompt); toast('给 agent 的指令已复制，粘贴到 agent 对话窗口即可。', false) }
+                  catch { toast('复制失败，完整说明见插件目录 docs/AGENT-PORT-SYNC.md。', true) }
+                },
+              }, '复制给 agent（适配其它插件端口同步设置）') : null,
+            ),
             h('div', { 'data-bv-hint': '' }, httpGuide.note),
             portSync ? h('div', {
               'data-bv-hint': '',
@@ -561,8 +600,6 @@ audio[data-bv-audio]{height:34px;max-width:100%}
               : null,
           ) : null,
         ),
-
-        preview.url ? h('audio', { 'data-bv-audio': '', controls: true, ref: preview.audioRef, src: preview.url }) : null,
 
         h('div', { 'data-bv-status': '' },
           h('span', { 'data-bv-dot': '', 'data-on': stat.loaded ? '' : undefined }),

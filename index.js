@@ -340,18 +340,31 @@ async function connectVoices() {
     instruction: p.instruction || '', seed: p.seed, ready: true, kind: 'instruction',
   }))
   const ids = new Set(base.map((v) => v.id))
+  // 显示名与自管模式统一：两种模式共用 voices 目录，都从本地 loadPresets 取
+  // name/description/seed。桌面版 /v1/voices 不返回可靠的 name（常退化成音色 id），
+  // 直接用会导致连接模式显示 id、自管模式显示中文名；桌面版启动中途数据不全时更明显。
+  // 这里 /v1/voices 只用来判断「哪些音色当前可用」，显示元数据一律以本地为准。
+  const localMeta = new Map()
+  const metaRoot = cfg.root || discoverRoot()
+  if (metaRoot) {
+    try { for (const p of loadPresets(metaRoot)) localMeta.set(p.id, p) } catch { /* 本地读不到则退回桌面版原样 */ }
+  }
   const refs = []
   for (const v of (Array.isArray(arr) ? arr : [])) {
     if (!v || !v.id) continue
     const id = String(v.id)
     if (ids.has(id)) continue
     ids.add(id)
-    const desc = v.description
-      ? String(v.description)
-      : (v.ref_text ? '「' + String(v.ref_text).slice(0, 30) + '」' : '桌面版克隆音色')
+    const local = localMeta.get(id)
+    const desc = (local && local.description)
+      || (v.description ? String(v.description) : (v.ref_text ? '「' + String(v.ref_text).slice(0, 30) + '」' : '克隆音色'))
     refs.push({
-      id, name: String(v.name || id), description: desc,
-      instruction: '', seed: 0, ready: true, kind: 'reference', refId: id,
+      id,
+      name: (local && local.name) || String(v.name || id),
+      description: desc,
+      instruction: (local && local.instruction) || '',
+      seed: local ? local.seed : 0,
+      ready: true, kind: 'reference', refId: id,
     })
   }
   return [...base, ...refs]

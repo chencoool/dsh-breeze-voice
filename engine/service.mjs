@@ -1,5 +1,5 @@
 import { spawn, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, closeSync, writeFileSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, writeFileSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs';
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {normalizeSpeech} from './loudness.mjs';
@@ -28,25 +28,111 @@ export const PRESETS = [
   { id: 'xingzhou', name: '星舟', description: '温润清朗男声', instruction: '一位年轻成年男性，温润清朗的中低音，干净沉稳而有亲和力，不沙哑，不压低嗓子。标准普通话，像朋友一样自然聊天，语速适中。', seed: 2026 },
 ];
 export function presetOf(value, presets=PRESETS) { return presets.find(p => p.id === value || p.name === value); }
+// 解析 .breeze 音色文件的头部，取出逐字稿/描述（格式见 runtime/docs/voices.md:173-198）。
+// 逐字稿是明文存在文件里的，所以读取音色不需要任何 ASR。
+function readBreezeMeta(file) {
+  const buf = readFileSync(file);
+  if (buf.length < 24 || buf.toString('ascii', 0, 4) !== 'BRZV') throw Error('不是 Breeze 音色文件。');
+  const version = buf.readUInt32LE(4);
+  const transcriptLen = buf.readUInt32LE(20);
+  let off = 24;
+  if (!Number.isInteger(transcriptLen) || transcriptLen < 0 || off + transcriptLen > buf.length) throw Error('音色文件逐字稿长度不合法。');
+  const transcript = buf.toString('utf8', off, off + transcriptLen).trim();
+  off += transcriptLen;
+  let description = '';
+  if (version === 2) {
+    const readU32 = () => { if (off + 4 > buf.length) throw Error('音色文件元数据不完整。'); const n = buf.readUInt32LE(off); off += 4; return n; };
+    const descLen = readU32();
+    if (descLen && off + descLen <= buf.length) { description = buf.toString('utf8', off, off + descLen); off += descLen; }
+    const fieldCount = readU32();
+    for (let i = 0; i < fieldCount && i < 32; i++) {
+      const nameLen = readU32(); if (off + nameLen > buf.length) break;
+      off += nameLen; // 字段名本插件用不到，跳过
+      const valueLen = readU32(); if (off + valueLen > buf.length) break;
+      off += valueLen;
+    }
+  }
+  return { transcript, description, version };
+}
+// 由音色 id 生成稳定 seed，保证同一音色每次合成可复现（不随重启变化）。
+function stableSeed(id) {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) % 0xffffffff;
+}
+// 从用户填的「音色名称和说明」里拆出显示名与说明。书写约定：名称后接逗号「，
+// （也认英文 ,）再写音色特点，如「温柔版大肥鱼，温柔清亮的女声」。插件把逗号转写成
+// 显示分隔符「 · 」（两边各一个空格）——下拉 label 正是 name + ' · ' + description。
+// 兼容历史的 · / • 分隔与无分隔符数据：按第一个句末标点拆；带括号的名字
+// （如「大肥鱼（破晓版）…」）收到第一个右括号，多余部分并回说明。
+// 没有用户文本时返回 null，调用方退回 id。
+function describeLabel(desc, transcript) {
+  const s = (desc || '').trim()
+  if (!s) return { name: null, description: transcript ? '「' + transcript.slice(0, 30) + '」' : '克隆音色' }
+  let name, detail
+  const parts = s.split(/[，,·•]/)
+  if (parts.length > 1) {
+    name = parts[0]; detail = parts.slice(1).join('，')
+  } else {
+    const cut = s.search(/[。！？.!?]/)
+    if (cut > 0) { name = s.slice(0, cut); detail = s.slice(cut).replace(/^[。！？.!?]\s*/, '') }
+    else { name = s; detail = '' }
+  }
+  const b = name.match(/^(.{1,14}?[（(][^）)]{1,14}[）)])(.*)$/)
+  if (b) { detail = (b[2].trim() + (detail.trim() ? ' ' + detail.trim() : '')).trim(); name = b[1] }
+  return { name: name.trim() || null, description: detail.trim() }
+}
 // Read per runtime and per request: sibling ESM imports may survive a host reload.
 export function loadPresets(root) {
-  const file=join(root,'voices','custom-presets.json');
-  if(!existsSync(file))return [...PRESETS];
-  const input=JSON.parse(readFileSync(file,'utf8'));
-  if(!Array.isArray(input)||input.length>64)throw Error('Breeze 自定义音色列表不合法。');
-  const ids=new Set(PRESETS.map(p=>p.id)),names=new Set(PRESETS.map(p=>p.name));
-  const custom=input.map(p=>{
-    if(!p||!/^[-a-z0-9_]{1,64}$/.test(p.id)||ids.has(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>64||names.has(p.name)||typeof p.description!=='string'||p.description.length>1000||typeof p.instruction!=='string'||p.instruction.length>2000||!Number.isInteger(p.seed)||p.seed<0||p.seed>0xffffffff||p.direction!==undefined&&(typeof p.direction!=='string'||p.direction.length>2000))throw Error('Breeze 自定义音色字段重复或不合法。');
-    const voice=join(root,'voices',p.id+'.breeze');
-    if(!existsSync(voice))throw Error('Breeze 自定义音色缺少文件：'+p.id);
-    const rel=relative(realpathSync(join(root,'voices')),realpathSync(voice));
-    if(rel.startsWith('..')||isAbsolute(rel)||!statSync(voice).isFile())throw Error('Breeze 音色文件越界或格式不合法。');
-    if(p.normalizeOutput!==undefined&&typeof p.normalizeOutput!=='boolean')throw Error('音量统一标记不合法。');
-    if(p.displayOrder!==undefined&&(!Number.isInteger(p.displayOrder)||Math.abs(p.displayOrder)>10000))throw Error('音色排序值不合法。');
-    ids.add(p.id);names.add(p.name);
-    return {id:p.id,name:p.name,description:p.description,instruction:p.instruction,seed:p.seed,...(p.direction?{direction:p.direction}:{}),...(p.normalizeOutput?{normalizeOutput:true}:{}),...(p.displayOrder!==undefined?{displayOrder:p.displayOrder}:{})};
-  });
-  return [...PRESETS,...custom.sort((a,b)=>(a.displayOrder??0)-(b.displayOrder??0))];
+  const voicesDir = join(root, 'voices');
+  const file = join(voicesDir, 'custom-presets.json');
+  const ids = new Set(PRESETS.map(p => p.id)), names = new Set(PRESETS.map(p => p.name));
+  let custom = [];
+  if (existsSync(file)) {
+    const input = JSON.parse(readFileSync(file, 'utf8'));
+    if (!Array.isArray(input) || input.length > 64) throw Error('Breeze 自定义音色列表不合法。');
+    custom = input.map(p => {
+      if (!p || !/^[-a-z0-9_]{1,64}$/.test(p.id) || ids.has(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 64 || names.has(p.name) || typeof p.description !== 'string' || p.description.length > 1000 || typeof p.instruction !== 'string' || p.instruction.length > 2000 || !Number.isInteger(p.seed) || p.seed < 0 || p.seed > 0xffffffff || p.direction !== undefined && (typeof p.direction !== 'string' || p.direction.length > 2000)) throw Error('Breeze 自定义音色字段重复或不合法。');
+      const voice = join(voicesDir, p.id + '.breeze');
+      if (!existsSync(voice)) throw Error('Breeze 自定义音色缺少文件：' + p.id);
+      const rel = relative(realpathSync(voicesDir), realpathSync(voice));
+      if (rel.startsWith('..') || isAbsolute(rel) || !statSync(voice).isFile()) throw Error('Breeze 音色文件越界或格式不合法。');
+      if (p.normalizeOutput !== undefined && typeof p.normalizeOutput !== 'boolean') throw Error('音量统一标记不合法。');
+      if (p.displayOrder !== undefined && (!Number.isInteger(p.displayOrder) || Math.abs(p.displayOrder) > 10000)) throw Error('音色排序值不合法。');
+      ids.add(p.id); names.add(p.name);
+      return { id: p.id, name: p.name, description: p.description, instruction: p.instruction, seed: p.seed, ...(p.direction ? { direction: p.direction } : {}), ...(p.normalizeOutput ? { normalizeOutput: true } : {}), ...(p.displayOrder !== undefined ? { displayOrder: p.displayOrder } : {}) };
+    });
+  }
+  // 扫描 voices\*.breeze：桌面版克隆音色只写文件、不登记 custom-presets.json，
+  // 自管（local）模式此前因此看不到。这里把未登记的音色按文件里的逐字稿自动建成条目，
+  // 让任意模式都能同步——不动用户的 custom-presets.json，也不新建同步文件夹。
+  const discovered = [];
+  if (existsSync(voicesDir)) {
+    for (const f of readdirSync(voicesDir)) {
+      if (!f.endsWith('.breeze')) continue;
+      const id = f.slice(0, -'.breeze'.length);
+      if (!/^[-a-z0-9_]{1,64}$/.test(id) || ids.has(id)) continue;
+      const voice = join(voicesDir, f);
+      try {
+        if (!statSync(voice).isFile()) continue;
+        const rel = relative(realpathSync(voicesDir), realpathSync(voice));
+        if (rel.startsWith('..') || isAbsolute(rel)) continue;
+        const meta = readBreezeMeta(voice);
+        ids.add(id);
+        // 用户填的「音色名称和说明」存进 .breeze 的 description；填了中文名就用它当
+        // 显示名、覆盖掉 ID；没填（只有逐字稿预览）才退回 id。见 describeLabel。
+        const label = describeLabel(meta.description, meta.transcript)
+        discovered.push({
+          id,
+          name: label.name || id,
+          description: label.description,
+          instruction: '',
+          seed: stableSeed(id),
+        });
+      } catch { /* 单个音色文件坏了就跳过，不影响其它音色 */ }
+    }
+  }
+  return [...PRESETS, ...custom.sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)), ...discovered];
 }
 export function validateText(value) {
   const text = String(value ?? '').trim();
