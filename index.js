@@ -170,7 +170,7 @@ function readConfig() {
   cfg.mode = normMode(cfg.mode)
   cfg.endpoint = normEndpoint(cfg.endpoint)
   cfg.toneMode = migrateTone(file, cfg.toneMode)   // 兼容旧三开关配置
-  cfg.contextAdapter = ['auto', 'aurabot', 'jsonl'].includes(cfg.contextAdapter) ? cfg.contextAdapter : 'auto'
+  cfg.contextAdapter = ['auto', 'aurabot', 'dsh', 'jsonl'].includes(cfg.contextAdapter) ? cfg.contextAdapter : 'auto'
   if (![1, 3, 5, 10, 15, 30].includes(cfg.unloadIdleMinutes)) cfg.unloadIdleMinutes = 5
   if (!cfg.root) {
     // 先扫各插件配置里记过的目录；没有再从 Windows 卸载注册表认桌面版安装目录。

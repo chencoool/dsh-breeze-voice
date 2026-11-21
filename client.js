@@ -457,7 +457,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
           ),
 
           // —— 聊天上下文来源（只在「模型润色语气」档起作用）——
-          h(Row, { key: 'contextAdapter', label: '聊天记录来源', hint: '模型润色语气要参考刚才聊了什么。不同聊天插件存记录的位置和格式都不一样，这里选按哪种格式读：自动识别会挨个试内置适配器，认得出就直接用；认不出或想自己指定，就选「通用 JSONL」再填下面两项。读不到就当没有，不影响使用。' },
+          h(Row, { key: 'contextAdapter', label: '聊天记录来源', hint: '模型润色语气要参考刚才聊了什么。不同聊天插件存记录的位置和格式都不一样，这里选按哪种格式读：自动识别会挨个试内置适配器，认得出就直接用；认不出或想自己指定，就选下面那项再填目录。读不到就当没有，不影响使用。' },
             h('select', {
               'data-bv-input': '', value: draft.contextAdapter || 'auto',
               onChange: (e) => set('contextAdapter', e.target.value),
@@ -465,9 +465,18 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             },
               h('option', { value: 'auto' }, '自动识别'),
               h('option', { value: 'aurabot' }, 'Aurabot QQ'),
+              h('option', { value: 'dsh' }, 'DSH 会话窗口'),
               h('option', { value: 'jsonl' }, '通用 JSONL'),
             ),
           ),
+
+          draft.contextAdapter === 'dsh' ? h(Row, { key: 'contextDir', label: '聊天插件工作目录', hint: '填聊天插件在 DSH 里跑会话时用的那个工作目录（是文件夹，不是聊天记录文件）。插件会顺着它找到对应的 DSH 会话窗口去读对话，比插件自己写的流水更全。这个目录本身空着也没关系——它只是用来定位会话窗口的。这一项必填。' },
+            h('input', {
+              'data-bv-input': '', type: 'text', value: draft.contextDir || '',
+              placeholder: '聊天插件在 DSH 里的工作目录',
+              onChange: (e) => set('contextDir', e.target.value),
+            }),
+          ) : null,
 
           draft.contextAdapter === 'jsonl' ? h(Row, { key: 'contextDir', label: '聊天记录目录', hint: '填聊天插件存放 .jsonl 记录的那个目录（含 .jsonl 文件那层）。这一项必填——通用模式不会去猜位置。' },
             h('input', {

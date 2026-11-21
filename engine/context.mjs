@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import aurabot from './adapters/aurabot.mjs';
+import dshSession from './adapters/dsh-session.mjs';
 import genericJsonl from './adapters/generic-jsonl.mjs';
 
 const DEFAULT_MAX = 8;          // 最多带几条
@@ -21,7 +22,7 @@ const DEFAULT_WINDOW_MS = 180000; // 只看最近 3 分钟
 const USER_FRESH_MS = 45000;    // 「对方刚说的话」有效期 45 秒
 
 /** 已注册的适配器，靠前的优先被自动识别。 */
-export const ADAPTERS = [aurabot, genericJsonl];
+export const ADAPTERS = [aurabot, dshSession, genericJsonl];
 
 /** Aurabot 数据目录：环境变量优先，否则 ~/.dsh/plugins-data/aurabot。 */
 export function aurabotDataDir() {
@@ -41,9 +42,21 @@ export function pickAdapter(dir, wanted) {
   }) || null;
 }
 
-/** 读适配器给出的每个文件，翻成统一记录，按时间升序。 */
+/** 读适配器给出的记录，按时间升序。
+ *  两种适配器形态：
+ *    ① 有 read()  —— 自己返回翻好的记录（如 DSH 会话，格式特殊、自带缓存）
+ *    ② 有 files()+parse() —— 逐文件逐行翻（如通用 JSONL）
+ */
 function loadLines(adapter, dir, fields, now = new Date()) {
   const out = [];
+  if (typeof adapter.read === 'function') {
+    let recs = [];
+    try { recs = adapter.read(dir, now) || []; } catch { recs = []; }
+    for (const rec of recs) {
+      if (rec && Number.isFinite(rec.t) && rec.text) out.push(rec);
+    }
+    return out.sort((a, b) => a.t - b.t);
+  }
   let files = [];
   try { files = adapter.files(dir, now) || []; } catch { files = []; }
   for (const file of files) {
@@ -77,8 +90,9 @@ function loadLines(adapter, dir, fields, now = new Date()) {
 export function recentContext(opt = {}) {
   const wanted = String(opt.adapter || 'auto').trim();
   const givenDir = String(opt.dir || '').trim();
-  // 目录不给就用对应适配器的默认位置；通用适配器没有默认位置，必须由用户在设置页填。
-  const dir = givenDir || (wanted === 'jsonl' ? '' : aurabotDataDir());
+  // 目录不给就用对应适配器的默认位置；通用 JSONL / DSH 会话没有默认位置，必须由用户在设置页填。
+  const NEEDS_DIR = wanted === 'jsonl' || wanted === 'dsh';
+  const dir = givenDir || (NEEDS_DIR ? '' : aurabotDataDir());
   const max = Math.max(1, Number(opt.max) || DEFAULT_MAX);
   const windowMs = Math.max(1000, Number(opt.windowMs) || DEFAULT_WINDOW_MS);
   const now = Number(opt.now) || Date.now();
@@ -87,8 +101,10 @@ export function recentContext(opt = {}) {
 
   if (!dir) {
     return {
-      ok: false, adapter: wanted === 'jsonl' ? 'jsonl' : '', chatId: '', userText: '', context: [], lines: [],
-      reason: '还没填聊天记录目录（「通用 JSONL」模式必须指定目录）',
+      ok: false, adapter: NEEDS_DIR ? wanted : '', chatId: '', userText: '', context: [], lines: [],
+      reason: wanted === 'dsh'
+        ? '还没填聊天插件的工作目录（选「DSH 会话窗口」时必须指定）'
+        : '还没填聊天记录目录（「通用 JSONL」模式必须指定目录）',
     };
   }
 
