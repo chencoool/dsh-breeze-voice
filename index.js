@@ -21,6 +21,7 @@ import { createHash, randomUUID } from 'node:crypto'
 
 import { readRuntime, loadPresets, PRESETS, validateText, wavBuffer, createService } from './engine/service.mjs'
 import { inferEmotion, composeInstruction, tuneEmotion, TONE_SYSTEM, buildTonePrompt, cleanTone } from './engine/emotion.mjs'
+import { recentContext } from './engine/context.mjs'
 
 export const name = 'breeze-voice'
 // webServer 是内置服务；petApi7340 由 dsh-pet 提供，用 ctx.get 软取（可能晚就绪）。
@@ -134,7 +135,10 @@ const DEFAULTS = {
   endpoint: DEFAULT_ENDPOINT,          // 桌面版后端地址（connect/auto 用）
   root: '',                            // 自管模式安装目录（含 breeze-server.exe；缺配置时自动补写）
   voice: 'qinglan',                    // 当前音色 id
-  toneMode: 'keyword',                 // 情绪处理方式：off(关) | keyword(关键词推断,0token) | model(关键词+模型润色语气)
+  toneMode: 'keyword',                 // 情绪处理方式：off(关) | keyword(关键词推断,0token) | model(模型润色念法，自动带聊天上下文)
+  contextAdapter: 'auto',              // 上下文来源适配器：auto(自动识别) | aurabot | jsonl(通用)
+  contextDir: '',                      // 聊天插件数据目录（留空=按适配器默认位置）
+  contextFields: '',                   // 通用 JSONL 适配器的字段映射（JSON 字符串）
   unloadIdle: true,                    // 空闲自动卸载模型释放显存（仅自管模式）
   unloadIdleMinutes: 5,               // 空闲多久卸载
   rate: 1,                             // 语速（契约保留）
@@ -166,6 +170,7 @@ function readConfig() {
   cfg.mode = normMode(cfg.mode)
   cfg.endpoint = normEndpoint(cfg.endpoint)
   cfg.toneMode = migrateTone(file, cfg.toneMode)   // 兼容旧三开关配置
+  cfg.contextAdapter = ['auto', 'aurabot', 'jsonl'].includes(cfg.contextAdapter) ? cfg.contextAdapter : 'auto'
   if (![1, 3, 5, 10, 15, 30].includes(cfg.unloadIdleMinutes)) cfg.unloadIdleMinutes = 5
   if (!cfg.root) {
     // 先扫各插件配置里记过的目录；没有再从 Windows 卸载注册表认桌面版安装目录。
@@ -413,7 +418,7 @@ async function status() {
   }
 }
 
-// ---- 情绪（L0 关 / L1 关键词 / L2 关键词+模型润色语气） --------------------
+// ---- 情绪（L0 关 / L1 关键词 / L2 模型润色） --------------------
 // 人设/性格不在这里——那属于聊天插件那层。本模块只把「这句怎么念」交给你选的音色。
 let currentCtx = null                 // apply() 注入，L2 用它取宿主 llm 服务
 const instructionCache = new Map()    // key=sha1(text+心情档+音色) → {t, text}，10 分钟 / 200 条 FIFO
@@ -447,18 +452,48 @@ function readMood() {
   } catch { return null }   // 没装 / 没写 / 读不动都当没有心情，退回纯文本线索
 }
 
-// L2：只让模型把已知心情+文字翻成一句语气提示，绝不让它重判情绪、绝不输出 JSON。
+// 读聊天记录当上下文：聊天插件的语音接口只发 {text}，没有上下文通道，
+// 但它们都把每条消息落在自己的数据目录里，直接读记录即可。
+// 格式差异交给适配器层（engine/adapters/）翻译；读不到就返回 null，行为跟以前完全一样。
+function contextFieldsOf() {
+  const raw = String(cfg.contextFields || '').trim()
+  if (!raw) return {}
+  try {
+    const j = JSON.parse(raw)
+    return j && typeof j === 'object' ? j : {}
+  } catch { return {} }
+}
+
+function readChatContext(textValue) {
+  try {
+    const r = recentContext({
+      text: textValue,
+      max: 8,
+      dir: String(cfg.contextDir || '').trim() || undefined,
+      adapter: cfg.contextAdapter || 'auto',
+      fields: contextFieldsOf(),
+    })
+    if (!r || !r.ok) return null
+    return { chatId: r.chatId, context: r.context, userText: r.userText, adapter: r.adapter }
+  } catch (e) {
+    log('读聊天上下文失败，按无上下文处理：', e && e.message ? e.message : e)
+    return null
+  }
+}
+
+// L2：全模型档——让模型自己判情绪档、给 cfg、写整段念法方向。
+// 只要求它输出一段 JSON；解析不出来就返回 null，调用方退回关键词骨架。
 async function askTone(prompt) {
   const ctx = currentCtx
-  if (!ctx || typeof ctx.get !== 'function') return ''
+  if (!ctx || typeof ctx.get !== 'function') return null
   const llm = ctx.get('llm', true) || ctx.llm
-  if (!llm || typeof llm.stream !== 'function') return ''
+  if (!llm || typeof llm.stream !== 'function') return null
   let sel = null
   try {
     const svc = ctx.get('agentDefaultModel', true)
     if (svc && typeof svc.currentSelection === 'function') sel = svc.currentSelection()
   } catch { /* 拿不到默认模型就放弃润色 */ }
-  if (!sel || !sel.provider || !sel.model) return ''
+  if (!sel || !sel.provider || !sel.model) return null
   const messages = [{
     role: 'user', id: randomUUID(),
     content: [{ type: 'text', text: prompt }],
@@ -466,6 +501,7 @@ async function askTone(prompt) {
   }]
   let out = ''
   // 不传 reasoningEffort：本地/无推理元数据的模型收到它会整轮报错。
+  // maxTokens 给到 120：模型只输出一句 ≤40 字的念法提示。
   for await (const chunk of llm.stream({
     provider: sel.provider, model: sel.model,
     system: TONE_SYSTEM, messages, maxTokens: 120, temperature: 0.5,
@@ -480,25 +516,40 @@ async function askTone(prompt) {
 async function emotionFor(textValue, opts = {}) {
   if (cfg.toneMode === 'off') return null
   const mood = (cfg.toneMode === 'model') ? readMood() : null
+  // 上下文：Aurabot 的 HTTP 语音接口只发一句话，但它把对话落在 chatlog 里。
+  // 模型润色档默认就读来一并交给模型（不用另开开关）；keyword 档不读，保持零 IO、零 token。
+  // 旧配置里显式写过 useContext:false 的仍然尊重，作为「不想读上下文」的兜底开关。
+  const ctx = (cfg.toneMode === 'model' && cfg.useContext !== false) ? readChatContext(textValue) : null
   const picked = inferEmotion(textValue, mood ? mood.label : '')
-  if (!picked || !picked.key) return null
-  let instruct = composeInstruction(picked)   // L1：档位语气（离线、零 token）
-  const cfgScale = tuneEmotion(picked.key, picked.intensity || 3).cfg
+  // 关键词没命中时的处理分两种：
+  // - keyword 档：直接不附加情绪（它就是纯关键词近似，零 token）。
+  // - model 档：给个中性档当骨架，照样让模型结合上下文写念法——
+  //   恰恰是「全靠语气词和上下文才听得出」的句子关键词一个都抓不到，
+  //   不能让它卡在门口，否则越过不去的句子越是需要模型看的那种。
+  if (!picked || !picked.key) {
+    if (cfg.toneMode !== 'model') return null
+  }
+  const baseKey = (picked && picked.key) ? picked.key : 'calm'
+  let instruct = composeInstruction({ key: baseKey })   // L1：档位语气（离线、零 token）
+  const cfgScale = tuneEmotion(baseKey, (picked && picked.intensity) || 3).cfg
 
   if (cfg.toneMode === 'model') {
     const voice = opts.voice || null
     const key = createHash('sha1')
-      .update([textValue, mood ? mood.label : '', String(voice && voice.id || '')].join('|'))
+      .update([textValue, mood ? mood.label : '', String(voice && voice.id || ''),
+        ctx ? ctx.context.join('|') + '|' + ctx.userText : ''].join('|'))
       .digest('hex')
     const hit = instructionCache.get(key)
     if (hit && Date.now() - hit.t < TONE_TTL) {
-      instruct = hit.text                       // 缓存命中：0 token、0 延迟
+      // 缓存命中：0 token、0 延迟
+      instruct = hit.text
     } else {
       try {
-        const prompt = buildTonePrompt(textValue, mood, voice)
+        const prompt = buildTonePrompt(textValue, mood, voice, ctx)
         const tone = await askTone(prompt)
+        // 模型只写这一句的念法，替换档位骨架里的念法描述；档位与 cfg 仍以关键词为准。
         if (tone) {
-          instruct = tone                       // 模型现写的自然语言语气提示
+          instruct = tone
           instructionCache.set(key, { t: Date.now(), text: tone })
           if (instructionCache.size > 200) instructionCache.delete(instructionCache.keys().next().value)
         }
@@ -507,7 +558,7 @@ async function emotionFor(textValue, opts = {}) {
       }
     }
   }
-  return { instruction: instruct, cfg: cfgScale, name: picked.key }
+  return { instruction: instruct, cfg: cfgScale, name: baseKey }
 }
 
 // ---- 合成 -----------------------------------------------------------------
@@ -515,14 +566,34 @@ async function emotionFor(textValue, opts = {}) {
 // 后触发的排队，前一个完成（成功或失败）再接续下一个。行为与自管模式
 // engine/service.mjs 的 queue promise 链一致；两种模式互斥、各用各的队列，互不影响。
 let connectQueue = Promise.resolve()
+
+// 台词里的括号动作描述（「（鼓起腮帮子）」「(sighs)」这类）是写给人看的舞台提示，
+// 不能念出来。但判档恰恰要靠它们当线索（尾巴翘起来→得意、鼓起腮帮子→委屈），
+// 所以顺序是：先用原文判档 → 再把括号剥掉送进合成。
+// 最多剥三层，兼容「（一边说一边（小声）嘟囔）」这种嵌套；剥完为空说明整句都是动作，
+// 退回原文，免得合成空音频。
+const ACTION_RE = /[（(][^（）()]*[）)]/g
+function stripActions(value) {
+  let out = String(value || '')
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(ACTION_RE, '')
+    if (next === out) break
+    out = next
+  }
+  return out.replace(/[ \t]{2,}/g, ' ').replace(/\s+([，。！？、；：])/g, '$1').trim()
+}
+
 async function speak(text, voiceId, opts = {}) {
   const m = await activeMode()
   const textValue = validateText(text)
   const id = String(voiceId || cfg.voice)
   const v = (voiceCache || []).find((x) => x.id === id) || null
+  // 判档用带括号的原文（括号动作是关键线索），合成用剥干净的文本。
   const emo = await emotionFor(textValue, { ...opts, voice: v })
-  if (m === 'connect') return speakConnect(textValue, voiceId, emo, opts)
-  return speakLocal(textValue, voiceId, emo)
+  const spoken = stripActions(textValue)
+  if (!spoken) throw new Error('这句只有括号里的动作描述，没有可念的文字。')
+  if (m === 'connect') return speakConnect(spoken, voiceId, emo, opts)
+  return speakLocal(spoken, voiceId, emo)
 }
 
 // 自管模式：走 engine/*.mjs，读 wav 字节后删临时文件。

@@ -35,6 +35,7 @@ window.__ModuleLoader__.load({
     const DEFAULTS = {
       mode: 'auto', endpoint: 'http://127.0.0.1:18099',
       root: '', voice: 'qinglan', toneMode: 'keyword',
+      contextAdapter: 'auto', contextDir: '', contextFields: '',
       unloadIdle: true, unloadIdleMinutes: 5, rate: 1,
     }
 
@@ -443,19 +444,49 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             preview.url ? h('audio', { 'data-bv-audio': '', controls: true, ref: preview.audioRef, src: preview.url, style: { alignSelf: 'flex-end' } }) : null,
           ),
 
-          h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气（0 token，默认）；模型润色：读聊天插件的心情值，让模型把这句该怎么念写成一句提示（约百来 token，结果缓存 10 分钟）。人设/性格由聊天插件决定，这里只管情绪化的念法。' },
+          h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气（0 token，默认）；模型润色：关键词先定档，再读聊天插件的心情值 + 最近对话，让模型把这句该怎么念写成一句提示（约百来 token，结果缓存 10 分钟）。人设/性格由聊天插件决定，这里只管情绪化的念法。' },
             h('select', {
               'data-bv-input': '', value: draft.toneMode || 'keyword',
               onChange: (e) => set('toneMode', e.target.value),
               style: { width: 150 },
             },
               h('option', { value: 'off' }, '关闭'),
-              h('option', { value: 'keyword' }, '关键词推断（推荐）'),
+              h('option', { value: 'keyword' }, '关键词推断（0 token）'),
               h('option', { value: 'model' }, '模型润色语气'),
             ),
           ),
 
-          h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说话就结束模型进程，释放显存；下次说话会自动重新加载。' },
+          // —— 聊天上下文来源（只在「模型润色语气」档起作用）——
+          h(Row, { key: 'contextAdapter', label: '聊天记录来源', hint: '模型润色语气要参考刚才聊了什么。不同聊天插件存记录的位置和格式都不一样，这里选按哪种格式读：自动识别会挨个试内置适配器，认得出就直接用；认不出或想自己指定，就选「通用 JSONL」再填下面两项。读不到就当没有，不影响使用。' },
+            h('select', {
+              'data-bv-input': '', value: draft.contextAdapter || 'auto',
+              onChange: (e) => set('contextAdapter', e.target.value),
+              style: { width: 150 },
+            },
+              h('option', { value: 'auto' }, '自动识别'),
+              h('option', { value: 'aurabot' }, 'Aurabot QQ'),
+              h('option', { value: 'jsonl' }, '通用 JSONL'),
+            ),
+          ),
+
+          draft.contextAdapter === 'jsonl' ? h(Row, { key: 'contextDir', label: '聊天记录目录', hint: '填聊天插件存放 .jsonl 记录的那个目录（含 .jsonl 文件那层）。这一项必填——通用模式不会去猜位置。' },
+            h('input', {
+              'data-bv-input': '', type: 'text', value: draft.contextDir || '',
+              placeholder: '该聊天插件存放 .jsonl 记录的目录',
+              onChange: (e) => set('contextDir', e.target.value),
+            }),
+          ) : null,
+
+          draft.contextAdapter === 'jsonl' ? h(Row, { key: 'contextFields', label: '字段对应（可选）', hint: '一行一条 JSON。默认按 t / who / text / chatId 四个字段名取；字段名不一样时填 JSON 覆盖，例如 {"t":"time","who":"sender","text":"content"}。who 值是 bot/assistant/self 之一就算「她自己说话」。' },
+            h('textarea', {
+              'data-bv-input': '', 'data-wide': '', rows: 2, value: draft.contextFields || '',
+              placeholder: '{"t":"time","who":"sender","text":"content"}',
+              style: { resize: 'vertical', lineHeight: '18px' },
+              onChange: (e) => set('contextFields', e.target.value),
+            }),
+          ) : null,
+
+h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说话就结束模型进程，释放显存；下次说话会自动重新加载。' },
             h(Switch, { on: Boolean(draft.unloadIdle), onChange: (v) => set('unloadIdle', v) }),
           ),
 
