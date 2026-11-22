@@ -78,6 +78,11 @@ window.__ModuleLoader__.load({
 [data-bv-btn][data-sm]{padding:2px 10px}
 /* 复制类小按钮：浅灰底，参照原生「选择文件」按钮的灰度。 */
 [data-bv-btn][data-gray]{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14))}
+/* 灰底按钮悬停/按下要再深一档——否则和原来一样，看着像没反应。
+   直接用 rgba 而不用 alias token：Theme 的 token 白名单里没有 pressed 这一档，
+   写 token 会落到未定义值；这两档灰度明暗主题下方向一致（都是同色加深）。 */
+[data-bv-btn][data-gray]:hover:not(:disabled){background:rgba(128,128,128,.28)}
+[data-bv-btn][data-gray]:active:not(:disabled){background:rgba(128,128,128,.38)}
 [data-bv-toggle]{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-primary,#1f2328)}
 [data-bv-toggle] input[type=checkbox]{width:16px;height:16px;margin:0;cursor:pointer;
   accent-color:var(--dsw-alias-label-primary,#1f2328)}
@@ -378,7 +383,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
                 h('div', { 'data-bv-row': '' },
                   h('div', { 'data-bv-msg': '' },
                     h('span', { 'data-bv-label': '' }, '尚未检测到 Breeze TTS 2 桌面版'),
-                    h('span', { 'data-bv-hint': '' }, '点下面按钮去官方仓库下载安装包，安装路径由你自己选；装好后回到这里会自动识别并配好链路。')),
+                    h('span', { 'data-bv-hint': '' }, '点下面按钮去项目的 Releases 页下载安装包（第三方开源桌面端，安装路径由你自己选）；装好后回到这里会自动识别并配好链路。')),
                   h('div', { 'data-bv-ctl': '' },
                     h('button', { 'data-bv-btn': '', 'data-primary': '', type: 'button', onClick: openDownload }, '下载安装桌面版'))))
             : h('div', {},
@@ -396,7 +401,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
                 h('div', { 'data-bv-hint': '' }, '合成方式由下方「连接方式」决定；装好桌面版、配置好模型即可使用。'),
                 h('div', { 'data-bv-row': '' },
                   h('div', { 'data-bv-msg': '' },
-                    h('span', { 'data-bv-hint': '' }, '要卸载？请到安装目录运行卸载器（不会删除本插件）：' + (install.uninstall || (install.dir + '\\Uninstall Breeze TTS 2.exe'))))))),
+                    h('span', { 'data-bv-hint': '' }, '要卸载？请到安装目录运行卸载器（不会删除本插件）：' + (install.uninstall || install.dir || '安装目录未知')))))),
 
         // —— 常规设置卡片 ——
         h('div', { 'data-bv-card': '' },
@@ -446,7 +451,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             preview.url ? h('audio', { 'data-bv-audio': '', controls: true, ref: preview.audioRef, src: preview.url, style: { alignSelf: 'flex-end' } }) : null,
           ),
 
-          h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气（0 token，默认）；模型润色：关键词先定档，再读聊天插件的心情值 + 最近对话，让模型把这句该怎么念写成一句提示（约百来 token，结果缓存 10 分钟）。人设/性格由聊天插件决定，这里只管情绪化的念法。' },
+          h(Row, { key: 'toneMode', label: '情绪语气', hint: '关：不加情绪；关键词：按文字挑语气，不花 token（默认）；模型润色：关键词先定档，再结合聊天上下文让模型写念法（约百来 token，缓存 10 分钟）。' },
             h('select', {
               'data-bv-input': '', value: draft.toneMode || 'keyword',
               onChange: (e) => set('toneMode', e.target.value),
@@ -459,7 +464,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
           ),
 
           // —— 聊天上下文来源（只在「模型润色语气」档起作用）——
-          h(Row, { key: 'contextAdapter', label: '聊天记录来源', hint: '模型润色语气要参考刚才聊了什么。不同聊天插件存记录的位置和格式都不一样，这里选按哪种格式读：自动识别会挨个试内置适配器，认得出就直接用；认不出或想自己指定，就选下面那项再填目录。读不到就当没有，不影响使用。' },
+          h(Row, { key: 'contextAdapter', label: '聊天记录来源', hint: '模型润色要参考刚才聊了什么。这里选按哪种格式读：自动识别会挨个试；认不出就手动选一项再填目录。读不到就当没有，不影响使用。' },
             h('select', {
               'data-bv-input': '', value: draft.contextAdapter || 'auto',
               onChange: (e) => set('contextAdapter', e.target.value),
@@ -497,7 +502,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             }),
           ) : null,
 
-          h(Row, { key: 'moodFile', label: '心情文件', hint: '聊天插件写心情的那个 json 文件。可以填完整路径，也可以只填它保存数据的那个目录（自动找里面的 mood.json）。目前只适配了 Aurabot——用 Aurabot 的话留空就行，会自动读它的位置，不用填。别的聊天插件：有心情文件就填上；没有心情设定也留空，插件会只看这句话本身判断语气。只在「模型润色语气」档使用。' },
+          h(Row, { key: 'moodFile', label: '心情文件', hint: '聊天插件写心情的 json 文件，填文件路径或它所在的目录都行。用 Aurabot 留空即可（只适配了它）；别的插件有就填，没有也留空。只在「模型润色」档生效。' },
             h('input', {
               'data-bv-input': '', 'data-wide': '', type: 'text', value: draft.moodFile || '',
               placeholder: '留空 = 默认位置；也可填目录或 xxx/mood.json',
@@ -596,7 +601,7 @@ h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说�
           h('div', { 'data-bv-hint': '' }, '检测 DSH 已装的、带本地语音服务接口的插件。本插件只做本地语音、且绝不改动其它插件的文件；pet 的私有接口已收录、自动接好，其余给参数由你自己填。拿不准某插件能不能接？点右上「复制给 agent（检测能不能接）」，把指令粘到 agent 对话窗口，它会读那个插件源码判断并给出接法——只检测、出方案，接不接全由你拍板。'),
           integrations.length ? h('div', { 'data-bv-vlist': '' },
             integrations.map((p) => h('div', { 'data-bv-vitem': '', key: p.id },
-              h('span', { title: p.detail }, p.name + ' · ' + p.detail),
+              h('span', { title: p.description || p.detail }, p.name),
               h('span', { 'data-bv-hint': '' }, p.status === 'auto' ? '✓ 已接入' : '需手动接入'),
             )),
           ) : h('div', { 'data-bv-hint': '' }, '没检测到其它本地语音插件。'),

@@ -88,8 +88,12 @@ function discoverRoot() {
 }
 
 // ---- 桌面版安装检测（查 Windows 卸载注册表） -------------------------------
-// 桌面版安装包会写卸载项，DisplayName 精确为 "Breeze TTS 2"。从 UninstallString
-// 里提引号内的卸载器路径、去掉末段文件名，就是安装目录。三个 hive 依次查。
+// 桌面版安装包会写卸载项。名字换过几次：v2.5 及更早 DisplayName 是 "Breeze TTS 2"，
+// v2.6 起程序改名 VoiceTrackStudio（中文名「声轨工坊」），卸载器叫
+// "Uninstall VoiceTrackStudio.exe"。所以这里不认死一个名字，靠 UninstallString /
+// DisplayIcon 里的 ASCII 路径认，再用 looksLikeBreezeRoot 校验目录（目录里得有
+// breeze-server.exe 或 breeze-runtime.json），避免误认别的软件。
+// 从 UninstallString 里提引号内的卸载器路径、去掉末段文件名，就是安装目录。
 // 不持久化任何"装没装"标记：卸载后注册表项消失，重启 DSH 自然回到待安装态。
 const DESKTOP_UNINSTALL_HIVES = [
   'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
@@ -102,29 +106,54 @@ function dirFromUninstallString(s) {
   const p = (quoted ? quoted[1] : s.trim().split(/\s+\//)[0]).trim()
   return p.replace(/[\\/][^\\/]+$/, '') || ''
 }
+// reg query /f <关键词> 只会打印**命中的那一行**，拿不到整块，所以改成整棵树列一遍
+// （HKCU 约 100ms）、按键切块再逐块判断。判断依据以**路径**为主：卸载器 / DisplayIcon
+// 里带 Breeze 或 VoiceTrackStudio 就算（这些是 ASCII，任何代码页都不会糊），再用
+// looksLikeBreezeRoot 复核目录。DisplayName 只是辅助——名称可能变成本地化中文，
+// 也可能被用户改，不能当唯一依据。
+const DESKTOP_PATH_RES = [/BreezeTTS/i, /Breeze TTS/i, /VoiceTrackStudio/i]
+const DESKTOP_NAME_RES = [/Breeze\s*TTS/i, /VoiceTrackStudio/i, /声轨工坊/, /Breeze/i]
+// reg 输出是系统 ANSI 代码页（简中即 GBK），按 latin1 读会把中文变乱码。
+// Node 自带 GBK 解码器，优先用它；解不了（非简中系统）再退回 latin1。
+function decodeReg(buf) {
+  try {
+    return new TextDecoder('gbk').decode(buf)
+  } catch {
+    return buf.toString('latin1')
+  }
+}
+function regQueryTree(hive) {
+  try {
+    const buf = execSync(`reg query "${hive}" /s`, {
+      encoding: 'buffer', timeout: 20000, windowsHide: true, maxBuffer: 128 * 1024 * 1024,
+    })
+    return decodeReg(buf)
+  } catch { return '' }
+}
+function blockValue(block, key) {
+  const re = new RegExp('^\\s*' + key + '\\s+REG_[A-Z_]+\\s+(.+)$', 'im')
+  const m = block.match(re)
+  return m ? m[1].trim() : ''
+}
 function detectDesktopInstall() {
   for (const hive of DESKTOP_UNINSTALL_HIVES) {
-    let txt = ''
-    try {
-      txt = execSync(`reg query "${hive}" /s /f "Breeze TTS 2"`, {
-        encoding: 'utf8', timeout: 6000, windowsHide: true,
-      })
-    } catch { continue }   // 这个 hive 没找到 / reg 不可用，试下一个
-    const blocks = txt.split(/HKEY_/).slice(1)
+    const txt = regQueryTree(hive)
+    if (!txt) continue
+    const blocks = txt.split(/^HKEY_/m).slice(1)
     for (const block of blocks) {
-      if (!/DisplayName\s+REG_SZ\s+Breeze TTS 2\b/i.test(block)) continue
-      const un = block.match(/UninstallString\s+REG_SZ\s+(.+)/i)
-      const ic = block.match(/DisplayIcon\s+REG_SZ\s+(.+)/i)
-      const ver = block.match(/DisplayVersion\s+REG_SZ\s+(.+)/i)
-      const uninstall = un ? un[1].trim() : ''
-      const icon = ic ? ic[1].trim() : ''
-      const dir = dirFromUninstallString(uninstall) || dirFromUninstallString(icon)
-      return {
-        installed: true,
-        version: ver ? ver[1].trim() : '',
-        dir,
-        uninstall,
-      }
+      const uninstall = blockValue(block, 'UninstallString')
+      const quiet = blockValue(block, 'QuietUninstallString')
+      const icon = blockValue(block, 'DisplayIcon')
+      const hunt = [uninstall, quiet, icon].join(' ')
+      const name = blockValue(block, 'DisplayName')
+      const byPath = DESKTOP_PATH_RES.some((re) => re.test(hunt))
+      const byName = DESKTOP_NAME_RES.some((re) => re.test(name))
+      if (!byPath && !byName) continue
+      const dir = dirFromUninstallString(uninstall) || dirFromUninstallString(quiet) || dirFromUninstallString(icon)
+      // 目录得真是个 Breeze 安装目录，防止别的软件被误认。
+      if (!dir || !looksLikeBreezeRoot(dir)) continue
+      const ver = blockValue(block, 'DisplayVersion')
+      return { installed: true, version: ver, dir, uninstall: uninstall || quiet }
     }
   }
   return { installed: false, version: '', dir: '', uninstall: '' }
@@ -876,7 +905,8 @@ function scanVoicePlugins() {
     if (!isPet && !hasLocalApi) continue
     const item = {
       id: name, packageName: name,
-      name: String(pkg.description || name).slice(0, 48),
+      name,                                    // 列表里显示插件本名（别拿 description 当名字）
+      description: String(pkg.description || '').slice(0, 200),   // 悬停看详情用
       kind: 'manual', status: 'manual',
       detail: '未发现对外注册口，需该插件作者接入 breezeVoice 服务',
       dataDir: '',
