@@ -35,7 +35,7 @@ window.__ModuleLoader__.load({
     const DEFAULTS = {
       mode: 'auto', endpoint: 'http://127.0.0.1:18099',
       root: '', voice: 'qinglan', toneMode: 'keyword',
-      contextAdapter: 'auto', contextDir: '', contextFields: '',
+      contextAdapter: 'auto', contextDir: '', contextFields: '', moodFile: '',
       unloadIdle: true, unloadIdleMinutes: 5, rate: 1,
     }
 
@@ -332,8 +332,10 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         try {
           const r = await jpost('/voice/delete', { id: v.refId || v.id })
           if (!r.ok) throw new Error(r.message || '删除失败')
-          toast('已删除音色「' + v.name + '」。', false)
-          await reload()
+          // 删除是用户主动动作，和「添加音色」一样要立刻刷下拉，不能等重开设置页。
+          await loadVoices()
+          const extra = r.fileRemoved ? '（音色文件已从这个文件夹删掉）' : ''
+          toast('已删除音色「' + v.name + '」。' + extra, false)
         } catch (e) { toast('删除失败：' + (e && e.message ? e.message : e), true) }
         finally { setBusy(false) }
       }
@@ -400,7 +402,7 @@ audio[data-bv-audio]{height:34px;max-width:100%}
         h('div', { 'data-bv-card': '' },
           h('div', { 'data-bv-card__title': '' }, '常规设置'),
 
-          h(Row, { key: 'mode', label: '连接方式', hint: '自动：桌面版后端（18099）活着就连它，否则本机自管；连接模式把模型/下载/显存交给桌面版界面。' },
+          h(Row, { key: 'mode', label: '连接方式', hint: '自动：桌面版后端（18099）活着就连它，否则本机自管；桌面模式把模型/下载/显存交给桌面版界面。' },
             h('select', {
               'data-bv-input': '', value: draft.mode,
               onChange: (e) => set('mode', e.target.value),
@@ -495,22 +497,30 @@ audio[data-bv-audio]{height:34px;max-width:100%}
             }),
           ) : null,
 
-h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说话就结束模型进程，释放显存；下次说话会自动重新加载。' },
+          h(Row, { key: 'moodFile', label: '心情文件', hint: '聊天插件写心情的那个 json 文件。可以填完整路径，也可以只填它保存数据的那个目录（自动找里面的 mood.json）。目前只适配了 Aurabot——用 Aurabot 的话留空就行，会自动读它的位置，不用填。别的聊天插件：有心情文件就填上；没有心情设定也留空，插件会只看这句话本身判断语气。只在「模型润色语气」档使用。' },
+            h('input', {
+              'data-bv-input': '', 'data-wide': '', type: 'text', value: draft.moodFile || '',
+              placeholder: '留空 = 默认位置；也可填目录或 xxx/mood.json',
+              onChange: (e) => set('moodFile', e.target.value),
+            }),
+          ),
+
+h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说话就结束模型进程，释放显存；下次说话会自动重新加载。（仅适用本机自管模式）' },
             h(Switch, { on: Boolean(draft.unloadIdle), onChange: (v) => set('unloadIdle', v) }),
           ),
 
-          h(Row, { key: 'unloadIdleMinutes', label: '空闲多久卸载', hint: '无活动达到这个时长后卸载模型。' },
+          h(Row, { key: 'unloadIdleMinutes', label: '空闲多久卸载', hint: '无活动达到这个时长后卸载模型进程。（仅适用本机自管模式）' },
             h('select', {
-              'data-bv-input': '', value: draft.unloadIdleMinutes,
+              'data-bv-input': '', value: draft.unloadIdleMinutes, disabled: !draft.unloadIdle,
               onChange: (e) => set('unloadIdleMinutes', Number(e.target.value)),
-              style: { width: 120 },
+              style: { width: 120, opacity: draft.unloadIdle ? 1 : 0.5 },
             }, [1, 3, 5, 10, 15, 30].map((n) => h('option', { key: n, value: n }, n + ' 分钟'))),
           ),
 
-          !isConnect ? h(Row, { key: 'gpu', label: '显存', hint: '手动加载/卸载模型进程；卸载只结束进程，模型和音色文件都不动。' },
+          !isConnect ? h(Row, { key: 'gpu', label: '模型进程', hint: '手动加载/卸载模型进程，卸载可释放被模型进程占用的显存。（仅适用本机自管模式）' },
             h('button', { 'data-bv-btn': '', type: 'button', disabled: busy, onClick: () => act('unload') }, '卸载'),
             h('button', { 'data-bv-btn': '', 'data-primary': '', type: 'button', disabled: busy, onClick: () => act('load') }, '加载'),
-          ) : h(Row, { key: 'gpu', label: '显存 / 模型', hint: '连接模式下由 Breeze TTS 2 桌面版界面管理（下载、切换量化档、显存）。' },
+          ) : h(Row, { key: 'gpu', label: '显存 / 模型', hint: '桌面模式下由 Breeze TTS 2 桌面版界面管理（下载、切换量化档、显存）。' },
             h('span', { 'data-bv-hint': '' }, '交给桌面版 →'),
           ),
         ),
@@ -565,10 +575,10 @@ h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说�
               h('span', { title: v.description || v.name }, v.name + (v.description ? ' · ' + v.description : '')),
               h('button', {
                 'data-bv-btn': '', 'data-danger': '', 'data-sm': '', type: 'button',
-                disabled: busy, onClick: () => doDeleteVoice(v), title: '从桌面版音色库删除',
+                disabled: busy, onClick: () => doDeleteVoice(v), title: '删除这个音色：同时清掉音色库里的文件',
               }, '删除'),
             )),
-          ) : h('div', { 'data-bv-hint': '' }, '桌面版音色库里还没有克隆音色。'),
+          ) : h('div', { 'data-bv-hint': '' }, '桌面版程序没在运行时，克隆音色库文件不会在本页面显示。'),
         ),
 
         // —— 接入其它本地语音插件卡片（只检测 + 给手动接入参数，不写别人目录）——
@@ -643,7 +653,7 @@ h(Row, { key: 'unloadIdle', label: '空闲卸载', hint: '一段时间没人说�
 
         h('div', { 'data-bv-status': '' },
           h('span', { 'data-bv-dot': '', 'data-on': stat.loaded ? '' : undefined }),
-          (stat.mode === 'connect' ? '连接模式' : stat.mode === 'local' ? '自管模式' : '检测中'),
+          (stat.mode === 'connect' ? '桌面模式' : stat.mode === 'local' ? '自管模式' : '检测中'),
           ' · ' + (stat.loaded ? (stat.mode === 'connect' ? '桌面版已连接' : '模型已加载') : (stat.message || '服务未就绪')),
           ' · ' + (stat.mode === 'connect' ? ('接口：' + (stat.endpoint || '—')) : ('目录：' + (stat.root || '未设置'))),
           ' · 音色：' + (draft.voice || '—'),

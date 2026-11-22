@@ -1,19 +1,19 @@
 // dsh-breeze-voice —— 宿主半端
 // ============================================================================
 // 把 Breeze TTS 2 封装成「通用语音输出插件」，两种工作模式：
-//   1) 连接模式（connect）：连接本机已运行的「Breeze TTS 2 桌面版」后端
+//   1) 桌面模式（connect）：连接本机已运行的「Breeze TTS 2 桌面版」后端
 //      （默认 http://127.0.0.1:18099），合成走 /v1/audio/speech（multipart），
 //      音色走 /v1/voices，模型/下载/显存全交给桌面版 UI。
 //   2) 自管模式（local）：插件自己 spawn breeze-server、读 breeze-runtime.json，
 //      合成走 engine/*.mjs（用装在本机的 Breeze 引擎，不依赖桌面版）。
-//   默认 mode='auto'：探测到 18099 活着就自动用连接模式，否则退回自管模式。
+//   默认 mode='auto'：探测到 18099 活着就自动用桌面模式，否则退回自管模式。
 // 把音色注册进「语音输出端」注册表：
 //   - 首选 dsh-pet 的 petApi7340.voice.register（dsh-pet 的下拉直接认出）
 //   - 同时以 breezeVoice 服务暴露给其它插件，谁愿意接都能接
 // 只碰输出端（TTS/Voice），不碰任何语音输入识别（STT/Speech）。
 // ============================================================================
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync, realpathSync } from 'node:fs'
 import { join, isAbsolute, relative } from 'node:path'
 import { homedir } from 'node:os'
 import { execSync } from 'node:child_process'
@@ -139,6 +139,7 @@ const DEFAULTS = {
   contextAdapter: 'auto',              // 上下文来源适配器：auto(自动识别) | aurabot | jsonl(通用)
   contextDir: '',                      // 聊天插件数据目录（留空=按适配器默认位置）
   contextFields: '',                   // 通用 JSONL 适配器的字段映射（JSON 字符串）
+  moodFile: '',                        // 聊天插件的心情文件（可填 json 路径或插件数据目录；留空=按 Aurabot 默认位置）
   unloadIdle: true,                    // 空闲自动卸载模型释放显存（仅自管模式）
   unloadIdleMinutes: 5,               // 空闲多久卸载
   rate: 1,                             // 语速（契约保留）
@@ -347,7 +348,7 @@ async function connectVoices() {
   const ids = new Set(base.map((v) => v.id))
   // 显示名与自管模式统一：两种模式共用 voices 目录，都从本地 loadPresets 取
   // name/description/seed。桌面版 /v1/voices 不返回可靠的 name（常退化成音色 id），
-  // 直接用会导致连接模式显示 id、自管模式显示中文名；桌面版启动中途数据不全时更明显。
+  // 直接用会导致桌面模式显示 id、自管模式显示中文名；桌面版启动中途数据不全时更明显。
   // 这里 /v1/voices 只用来判断「哪些音色当前可用」，显示元数据一律以本地为准。
   const localMeta = new Map()
   const metaRoot = cfg.root || discoverRoot()
@@ -424,9 +425,15 @@ let currentCtx = null                 // apply() 注入，L2 用它取宿主 llm
 const instructionCache = new Map()    // key=sha1(text+心情档+音色) → {t, text}，10 分钟 / 200 条 FIFO
 const TONE_TTL = 10 * 60_000
 
-// 心情来自聊天插件（Aurabot）落盘的 mood.json：{ value, reason, ... }。
-// 路径与 Aurabot 的 dataDir() 对齐：AURABOT_DATA_DIR 优先，其次 DSH_HOME/plugins-data/aurabot。
+// 心情来自聊天插件落盘的 mood.json：{ value, reason, ... }。
+// 设置页「心情文件」可填完整 json 路径，或填聊天插件数据目录（自动补 mood.json）。
+// 留空则按 Aurabot 的 dataDir() 默认位置：AURABOT_DATA_DIR 优先，其次 DSH_HOME/plugins-data/aurabot。
 function moodFile() {
+  const custom = String(cfg.moodFile || '').trim()
+  if (custom) {
+    if (/\.json$/i.test(custom)) return custom
+    return join(custom, 'mood.json')
+  }
   if (process.env.AURABOT_DATA_DIR && isAbsolute(process.env.AURABOT_DATA_DIR)) {
     return join(process.env.AURABOT_DATA_DIR, 'mood.json')
   }
@@ -562,7 +569,7 @@ async function emotionFor(textValue, opts = {}) {
 }
 
 // ---- 合成 -----------------------------------------------------------------
-// 连接模式的合成队列：桌面版后端同一时刻适合只跑一个合成任务。先触发的先合成，
+// 桌面模式的合成队列：桌面版后端同一时刻适合只跑一个合成任务。先触发的先合成，
 // 后触发的排队，前一个完成（成功或失败）再接续下一个。行为与自管模式
 // engine/service.mjs 的 queue promise 链一致；两种模式互斥、各用各的队列，互不影响。
 let connectQueue = Promise.resolve()
@@ -607,7 +614,7 @@ async function speakLocal(textValue, voiceId, emo) {
   return { bytes, voice: result.voice, emotion: result.emotion || null }
 }
 
-// 连接模式：multipart POST 到桌面版后端，拿裸 PCM，封成 WAV 字节。
+// 桌面模式：multipart POST 到桌面版后端，拿裸 PCM，封成 WAV 字节。
 async function speakConnect(textValue, voiceId, emo, opts = {}) {
   const ep = cfg.endpoint || DEFAULT_ENDPOINT
   const id = String(voiceId || cfg.voice)
@@ -632,7 +639,7 @@ async function speakConnect(textValue, voiceId, emo, opts = {}) {
     if (instr) form.append('instruction', instr)
   }
 
-  // 挂到连接模式队列：先触发的先合成，后面的在链上排队，前一个完成/失败再接续下一个。
+  // 挂到桌面模式队列：先触发的先合成，后面的在链上排队，前一个完成/失败再接续下一个。
   // 超时计时从排到队、真正开始合成时才启动——排队等待不消耗 200 秒预算。
   // 若调用方自带 signal（如取消），排队阶段也监听它，取消后轮到自己时立即放弃。
   const job = connectQueue.then(async () => {
@@ -680,6 +687,40 @@ async function addVoice(req) {
   return text || '{"ok":true}'
 }
 
+// 桌面版 DELETE /v1/voices/<id> 只把它从内存里摘掉（官方文档：file_kept，重启会复活），
+// 文件还在 voices\<id>.breeze。这里补上本地清理：删文件 + 从 custom-presets.json 摘掉登记项，
+// 否则删除后下拉里还会冒出来，重启桌面版又全都回来了。
+function pruneLocalVoice(id) {
+  const root = cfg.root || discoverRoot()
+  if (!root || !id) return { fileRemoved: false, presetRemoved: false }
+  const voicesDir = join(root, 'voices')
+  const target = join(voicesDir, `${id}.breeze`)
+  let fileRemoved = false, presetRemoved = false
+  try {
+    if (existsSync(target)) {
+      const rel = relative(realpathSync(voicesDir), realpathSync(target))
+      if (!rel.startsWith('..') && !isAbsolute(rel) && statSync(target).isFile()) {
+        unlinkSync(target)
+        fileRemoved = true
+      }
+    }
+  } catch (e) { log('删除音色文件失败：' + (e && e.message ? e.message : e)) }
+  try {
+    const file = join(voicesDir, 'custom-presets.json')
+    if (existsSync(file)) {
+      const arr = JSON.parse(readFileSync(file, 'utf8'))
+      if (Array.isArray(arr)) {
+        const next = arr.filter((p) => !p || p.id !== id)
+        if (next.length !== arr.length) {
+          writeFileSync(file, JSON.stringify(next, null, 2))
+          presetRemoved = true
+        }
+      }
+    }
+  } catch (e) { log('从音色清单摘除失败：' + (e && e.message ? e.message : e)) }
+  return { fileRemoved, presetRemoved }
+}
+
 async function deleteVoice(id) {
   const ep = cfg.endpoint || DEFAULT_ENDPOINT
   if (!id) throw new Error('缺少音色 id')
@@ -694,9 +735,17 @@ async function deleteVoice(id) {
   }
   let text = ''
   try { text = await res.text() } catch { /* 忽略 */ }
-  if (!res.ok) throw new Error('桌面版删除音色失败 HTTP ' + res.status + (text ? '：' + text.slice(0, 200) : ''))
+  // 404 = 桌面版内存里本来就没有这个音色（常见于重启后它还没加载），这时不该挡住本地清理。
+  if (!res.ok && res.status !== 404) {
+    throw new Error('桌面版删除音色失败 HTTP ' + res.status + (text ? '：' + text.slice(0, 200) : ''))
+  }
+  const local = pruneLocalVoice(id)
   try { await voices() } catch { /* 忽略 */ }
-  return text || '{"ok":true}'
+  return JSON.stringify({
+    ok: true,
+    ...(local.fileRemoved ? { fileRemoved: true } : {}),
+    ...(local.presetRemoved ? { presetRemoved: true } : {}),
+  })
 }
 
 // ---- 空闲卸载（仅自管模式有意义） ------------------------------------------
@@ -1141,7 +1190,7 @@ export function apply(ctx) {
         // POST /unload —— 手动卸载模型释放显存（仅自管模式）
         if (method === 'POST' && path === '/unload') {
           if ((await activeMode()) === 'connect') {
-            return sendJson(res, 200, { ok: true, message: '连接模式：模型由桌面版管理，请在桌面版界面卸载/切换。' })
+            return sendJson(res, 200, { ok: true, message: '桌面模式：模型由桌面版管理，请在桌面版界面卸载/切换。' })
           }
           if (!service || serviceRoot !== cfg.root) {
             try { service = engine() } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }) }
@@ -1153,7 +1202,7 @@ export function apply(ctx) {
         // POST /load —— 手动加载模型（仅自管模式）
         if (method === 'POST' && path === '/load') {
           if ((await activeMode()) === 'connect') {
-            return sendJson(res, 200, { ok: true, message: '连接模式：模型由桌面版管理，请在桌面版界面加载/切换。' })
+            return sendJson(res, 200, { ok: true, message: '桌面模式：模型由桌面版管理，请在桌面版界面加载/切换。' })
           }
           try { await engine().ensure(); return sendJson(res, 200, { ok: true, message: '模型已加载。' }) }
           catch (e) { return sendJson(res, 200, { ok: false, message: e.message }) }

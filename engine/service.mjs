@@ -91,17 +91,22 @@ export function loadPresets(root) {
   if (existsSync(file)) {
     const input = JSON.parse(readFileSync(file, 'utf8'));
     if (!Array.isArray(input) || input.length > 64) throw Error('Breeze 自定义音色列表不合法。');
-    custom = input.map(p => {
-      if (!p || !/^[-a-z0-9_]{1,64}$/.test(p.id) || ids.has(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 64 || names.has(p.name) || typeof p.description !== 'string' || p.description.length > 1000 || typeof p.instruction !== 'string' || p.instruction.length > 2000 || !Number.isInteger(p.seed) || p.seed < 0 || p.seed > 0xffffffff || p.direction !== undefined && (typeof p.direction !== 'string' || p.direction.length > 2000)) throw Error('Breeze 自定义音色字段重复或不合法。');
-      const voice = join(voicesDir, p.id + '.breeze');
-      if (!existsSync(voice)) throw Error('Breeze 自定义音色缺少文件：' + p.id);
-      const rel = relative(realpathSync(voicesDir), realpathSync(voice));
-      if (rel.startsWith('..') || isAbsolute(rel) || !statSync(voice).isFile()) throw Error('Breeze 音色文件越界或格式不合法。');
-      if (p.normalizeOutput !== undefined && typeof p.normalizeOutput !== 'boolean') throw Error('音量统一标记不合法。');
-      if (p.displayOrder !== undefined && (!Number.isInteger(p.displayOrder) || Math.abs(p.displayOrder) > 10000)) throw Error('音色排序值不合法。');
-      ids.add(p.id); names.add(p.name);
-      return { id: p.id, name: p.name, description: p.description, instruction: p.instruction, seed: p.seed, ...(p.direction ? { direction: p.direction } : {}), ...(p.normalizeOutput ? { normalizeOutput: true } : {}), ...(p.displayOrder !== undefined ? { displayOrder: p.displayOrder } : {}) };
-    });
+    // 逐条校验、逐条容错：某一条不合法或音色文件已被删掉，只跳过这一条，
+    // 不能让它连累整个列表——否则用户手动删了一个 .breeze 文件，下拉里
+    // 所有自定义音色会一起消失，只剩四个内置音色。
+    for (const p of input) {
+      try {
+        if (!p || !/^[-a-z0-9_]{1,64}$/.test(p.id) || ids.has(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 64 || names.has(p.name) || typeof p.description !== 'string' || p.description.length > 1000 || typeof p.instruction !== 'string' || p.instruction.length > 2000 || !Number.isInteger(p.seed) || p.seed < 0 || p.seed > 0xffffffff || p.direction !== undefined && (typeof p.direction !== 'string' || p.direction.length > 2000)) continue;
+        const voice = join(voicesDir, p.id + '.breeze');
+        if (!existsSync(voice)) continue;
+        const rel = relative(realpathSync(voicesDir), realpathSync(voice));
+        if (rel.startsWith('..') || isAbsolute(rel) || !statSync(voice).isFile()) continue;
+        if (p.normalizeOutput !== undefined && typeof p.normalizeOutput !== 'boolean') continue;
+        if (p.displayOrder !== undefined && (!Number.isInteger(p.displayOrder) || Math.abs(p.displayOrder) > 10000)) continue;
+        ids.add(p.id); names.add(p.name);
+        custom.push({ id: p.id, name: p.name, description: p.description, instruction: p.instruction, seed: p.seed, ...(p.direction ? { direction: p.direction } : {}), ...(p.normalizeOutput ? { normalizeOutput: true } : {}), ...(p.displayOrder !== undefined ? { displayOrder: p.displayOrder } : {}) });
+      } catch { /* 单条不合法就跳过 */ }
+    }
   }
   // 扫描 voices\*.breeze：桌面版克隆音色只写文件、不登记 custom-presets.json，
   // 自管（local）模式此前因此看不到。这里把未登记的音色按文件里的逐字稿自动建成条目，
