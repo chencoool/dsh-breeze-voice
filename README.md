@@ -141,4 +141,4 @@ dsh plugin --profile desktop add github:chencoool/dsh-breeze-voice
 
 ## 版权
 
-本插件 MIT。Breeze TTS 2 的引擎、模型与音色的版权归各自上游作者所有，使用时遵守其许可条款。
+本插件使用 MIT 许可，完整条款见仓库根目录的 [LICENSE](LICENSE)。Breeze TTS 2 的引擎、模型与音色的版权归各自上游作者所有，使用时遵守其许可条款。
